@@ -378,6 +378,7 @@ namespace HBE::Input {
 	}
 
 	InputMap& Get() {
+		assert(g_map && "HBE::Input::Get() called before Initialize()");
 		return *g_map;
 	}
 

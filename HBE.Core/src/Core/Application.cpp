@@ -171,6 +171,18 @@ namespace HBE::Core {
 			}
 			break;
 		}
+		case SDL_EVENT_WINDOW_FOCUS_LOST: {
+			// Pause gameplay-ish sounds when the app loses focus.
+			// Keep it simple for now: pause SFX + Ambient, leave Music alone if you prefer.
+			m_audio.pauseBus(HBE::Platform::Audio::Bus::SFX);
+			m_audio.pauseBus(HBE::Platform::Audio::Bus::Ambient);
+			break;
+		}
+		case SDL_EVENT_WINDOW_FOCUS_GAINED: {
+			m_audio.resumeBus(HBE::Platform::Audio::Bus::SFX);
+			m_audio.resumeBus(HBE::Platform::Audio::Bus::Ambient);
+			break;
+		}
 							   // -------- Window Resize Events ----------
 							   // SDL3 has multiple size-related events. These are the ones you�ll commonly see.
 		case SDL_EVENT_WINDOW_RESIZED:
@@ -324,6 +336,8 @@ namespace HBE::Core {
 			for (auto& layer : m_layers) {
 				if (layer) layer->onUpdate(dt);
 			}
+			// keep audio spatialization / finished-track cleanup fresh
+			m_audio.update(dt);
 
 			// 1) Clear the whole window (black bars)
 			m_gl.beginFrameFullWindow(m_winW, m_winH);

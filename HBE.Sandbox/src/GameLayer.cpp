@@ -182,7 +182,25 @@ void GameLayer::onAttach(Application& app) {
     hotReloadUITheme(); // apply theme at startup (optional, but nice)
 
     // Load test sound
-    app.audio().loadSound("test", "assets/audio/test_sound.wav");
+        // ---------------------------------------------------------------------
+    // Audio bootstrap
+    // For now we only have test_sound.wav in the repo, so reuse it for
+    // multiple logical events until you drop in real assets.
+    // ---------------------------------------------------------------------
+    app.audio().setMasterGain(1.0f);
+    app.audio().setBusGain(HBE::Platform::Audio::Bus::Music, 0.65f);
+    app.audio().setBusGain(HBE::Platform::Audio::Bus::SFX, 1.0f);
+    app.audio().setBusGain(HBE::Platform::Audio::Bus::UI, 0.90f);
+    app.audio().setBusGain(HBE::Platform::Audio::Bus::Ambient, 0.80f);
+
+    app.audio().loadSound("footstep", "assets/audio/test_sound.wav", true);
+    app.audio().loadSound("hit", "assets/audio/test_sound.wav", true);
+    app.audio().loadSound("ui_blip", "assets/audio/test_sound.wav", true);
+
+    // When you add a real music file later, swap the path below.
+    // Example:
+    // app.audio().loadMusic("bgm_main", "assets/audio/forest_theme.ogg");
+    // app.audio().playMusic("bgm_main", -1, 0.8f);
 
     // choose collision layer by name
     m_collisionLayer = m_tileMap.findLayer("Ground");
@@ -656,9 +674,58 @@ void GameLayer::onUpdate(float dt) {
         // (left blank like your current file)
     }
 
-    // Play test sound on T key press
+    // Controlled entity (for camera follow)
+    Transform2D* playerTr = m_scene.getTransform(m_soldierEntity);
+    if (!playerTr) return;
+
+    // Keep the audio listener centered on the player/camera.
+    m_app->audio().setListenerPosition(playerTr->posX, playerTr->posY);
+
+    // Quick audio test keys
     if (KeyPressed(SDL_SCANCODE_T)) {
-        m_app->audio().playSound("test");
+        HBE::Platform::Audio::PlayParams p;
+        p.bus = HBE::Platform::Audio::Bus::SFX;
+        p.gain = 1.0f;
+        p.positional = true;
+        p.worldX = playerTr->posX + 120.0f; // sound slightly to the right
+        p.worldY = playerTr->posY;
+        p.minDistance = 10.0f;
+        p.maxDistance = 350.0f;
+        p.panRange = 240.0f;
+
+        m_app->audio().playSoundEx("hit", p);
+    }
+
+    if (KeyPressed(SDL_SCANCODE_Y)) {
+        m_app->audio().pauseBus(HBE::Platform::Audio::Bus::SFX);
+    }
+
+    if (KeyPressed(SDL_SCANCODE_U)) {
+        m_app->audio().resumeBus(HBE::Platform::Audio::Bus::SFX);
+    }
+
+    // Play test sound on T key press
+    // Quick audio test keys
+    if (KeyPressed(SDL_SCANCODE_T)) {
+        HBE::Platform::Audio::PlayParams p;
+        p.bus = HBE::Platform::Audio::Bus::SFX;
+        p.gain = 1.0f;
+        p.positional = true;
+        p.worldX = playerTr->posX + 120.0f; // sound slightly to the right
+        p.worldY = playerTr->posY;
+        p.minDistance = 10.0f;
+        p.maxDistance = 350.0f;
+        p.panRange = 240.0f;
+
+        m_app->audio().playSoundEx("hit", p);
+    }
+
+    if (KeyPressed(SDL_SCANCODE_Y)) {
+        m_app->audio().pauseBus(HBE::Platform::Audio::Bus::SFX);
+    }
+
+    if (KeyPressed(SDL_SCANCODE_U)) {
+        m_app->audio().resumeBus(HBE::Platform::Audio::Bus::SFX);
     }
 
     // ---- stats ----
@@ -886,10 +953,6 @@ void GameLayer::onUpdate(float dt) {
     // Hot reload poll
     m_watcher.poll(dt);
 
-    // Controlled entity (for camera follow)
-    Transform2D* playerTr = m_scene.getTransform(m_soldierEntity);
-    if (!playerTr) return;
-
     // Tick scripts + physics + animators.
     // Catch animation events here.
     m_scene.update(dt, [&](const std::string& ev) {
@@ -899,9 +962,33 @@ void GameLayer::onUpdate(float dt) {
 
         if (ev == "footstep") {
             spawnPopup(px, py - 30.0f, "step", Color4{ 0.8f,0.9f,1.0f,1.0f }, 0.35f, 35.0f);
+
+            HBE::Platform::Audio::PlayParams p;
+            p.bus = HBE::Platform::Audio::Bus::SFX;
+            p.gain = 0.55f;
+            p.positional = true;
+            p.worldX = px;
+            p.worldY = py;
+            p.minDistance = 24.0f;
+            p.maxDistance = 260.0f;
+            p.panRange = 220.0f;
+
+            m_app->audio().playSoundEx("footstep", p);
         }
         else if (ev == "hitframe") {
             spawnPopup(px, py + 50.0f, "HIT!", Color4{ 1.0f,0.3f,0.2f,1.0f }, 0.55f, 25.0f);
+
+            HBE::Platform::Audio::PlayParams p;
+            p.bus = HBE::Platform::Audio::Bus::SFX;
+            p.gain = 0.9f;
+            p.positional = true;
+            p.worldX = px;
+            p.worldY = py;
+            p.minDistance = 18.0f;
+            p.maxDistance = 320.0f;
+            p.panRange = 260.0f;
+
+            m_app->audio().playSoundEx("hit", p);
         }
         });
 
