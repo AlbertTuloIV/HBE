@@ -182,7 +182,25 @@ void GameLayer::onAttach(Application& app) {
     hotReloadUITheme(); // apply theme at startup (optional, but nice)
 
     // Load test sound
-    app.audio().loadSound("test", "assets/audio/test_sound.wav");
+        // ---------------------------------------------------------------------
+    // Audio bootstrap
+    // For now we only have test_sound.wav in the repo, so reuse it for
+    // multiple logical events until you drop in real assets.
+    // ---------------------------------------------------------------------
+    app.audio().setMasterGain(1.0f);
+    app.audio().setBusGain(HBE::Platform::Audio::Bus::Music, 0.65f);
+    app.audio().setBusGain(HBE::Platform::Audio::Bus::SFX, 1.0f);
+    app.audio().setBusGain(HBE::Platform::Audio::Bus::UI, 0.90f);
+    app.audio().setBusGain(HBE::Platform::Audio::Bus::Ambient, 0.80f);
+
+    app.audio().loadSound("footstep", "assets/audio/test_sound.wav", true);
+    app.audio().loadSound("hit", "assets/audio/test_sound.wav", true);
+    app.audio().loadSound("ui_blip", "assets/audio/test_sound.wav", true);
+
+    // When you add a real music file later, swap the path below.
+    // Example:
+    // app.audio().loadMusic("bgm_main", "assets/audio/forest_theme.ogg");
+    // app.audio().playMusic("bgm_main", -1, 0.8f);
 
     // choose collision layer by name
     m_collisionLayer = m_tileMap.findLayer("Ground");
@@ -656,9 +674,34 @@ void GameLayer::onUpdate(float dt) {
         // (left blank like your current file)
     }
 
-    // Play test sound on T key press
+    // Controlled entity (for camera follow)
+    Transform2D* playerTr = m_scene.getTransform(m_soldierEntity);
+    if (!playerTr) return;
+
+    // Keep the audio listener centered on the player/camera.
+    m_app->audio().setListenerPosition(playerTr->posX, playerTr->posY);
+
+    // Quick audio test keys
     if (KeyPressed(SDL_SCANCODE_T)) {
-        m_app->audio().playSound("test");
+        HBE::Platform::Audio::PlayParams p;
+        p.bus = HBE::Platform::Audio::Bus::SFX;
+        p.gain = 1.0f;
+        p.positional = true;
+        p.worldX = playerTr->posX + 120.0f; // sound slightly to the right
+        p.worldY = playerTr->posY;
+        p.minDistance = 10.0f;
+        p.maxDistance = 350.0f;
+        p.panRange = 240.0f;
+
+        m_app->audio().playSoundEx("hit", p);
+    }
+
+    if (KeyPressed(SDL_SCANCODE_Y)) {
+        m_app->audio().pauseBus(HBE::Platform::Audio::Bus::SFX);
+    }
+
+    if (KeyPressed(SDL_SCANCODE_U)) {
+        m_app->audio().resumeBus(HBE::Platform::Audio::Bus::SFX);
     }
 
     // ---- stats ----
@@ -886,10 +929,6 @@ void GameLayer::onUpdate(float dt) {
     // Hot reload poll
     m_watcher.poll(dt);
 
-    // Controlled entity (for camera follow)
-    Transform2D* playerTr = m_scene.getTransform(m_soldierEntity);
-    if (!playerTr) return;
-
     // Tick scripts + physics + animators.
     // Catch animation events here.
     m_scene.update(dt, [&](const std::string& ev) {
@@ -899,9 +938,33 @@ void GameLayer::onUpdate(float dt) {
 
         if (ev == "footstep") {
             spawnPopup(px, py - 30.0f, "step", Color4{ 0.8f,0.9f,1.0f,1.0f }, 0.35f, 35.0f);
+
+            HBE::Platform::Audio::PlayParams p;
+            p.bus = HBE::Platform::Audio::Bus::SFX;
+            p.gain = 0.55f;
+            p.positional = true;
+            p.worldX = px;
+            p.worldY = py;
+            p.minDistance = 24.0f;
+            p.maxDistance = 260.0f;
+            p.panRange = 220.0f;
+
+            m_app->audio().playSoundEx("footstep", p);
         }
         else if (ev == "hitframe") {
             spawnPopup(px, py + 50.0f, "HIT!", Color4{ 1.0f,0.3f,0.2f,1.0f }, 0.55f, 25.0f);
+
+            HBE::Platform::Audio::PlayParams p;
+            p.bus = HBE::Platform::Audio::Bus::SFX;
+            p.gain = 0.9f;
+            p.positional = true;
+            p.worldX = px;
+            p.worldY = py;
+            p.minDistance = 18.0f;
+            p.maxDistance = 320.0f;
+            p.panRange = 260.0f;
+
+            m_app->audio().playSoundEx("hit", p);
         }
         });
 
@@ -1218,7 +1281,7 @@ void GameLayer::onRender() {
     con.w = LOGICAL_WIDTH - 40.0f;
     con.h = 170.0f;
 
-    m_console.draw(m_ui, con);
+    m_console.draw(m_ui, con, m_lastDt);
     
     r2d.endScene();
 
@@ -1234,36 +1297,41 @@ bool GameLayer::onEvent(HBE::Core::Event& e) {
     // Toggle console with ~ (grave)
     if (e.type() == EventType::KeyPressed) {
         auto& ke = static_cast<KeyPressedEvent&>(e);
-        if (!ke.repeat) {
-
-            // ~ toggles console
-            if (ke.keyScancode == SDL_SCANCODE_GRAVE) {
-                m_console.toggle();
-                e.handled = true;
-                return true;
-            }
-
-            // F1 toggles all dev windows
-            if (ke.keyScancode == SDL_SCANCODE_F1) {
-                bool anyOn = (m_showDevTools || m_showInspector || m_showFpsGraph);
-                m_showDevTools = !anyOn;
-                m_showInspector = !anyOn;
-                m_showFpsGraph = !anyOn;
-                e.handled = true;
-                return true;
-            }
-
-            // Individual toggles
-            if (ke.keyScancode == SDL_SCANCODE_F2) { m_showDevTools = !m_showDevTools; e.handled = true; return true; }
-            if (ke.keyScancode == SDL_SCANCODE_F3) { m_showInspector = !m_showInspector; e.handled = true; return true; }
-            if (ke.keyScancode == SDL_SCANCODE_F4) { m_console.toggle(); e.handled = true; return true; }
-            if (ke.keyScancode == SDL_SCANCODE_F5) { m_showFpsGraph = !m_showFpsGraph; e.handled = true; return true; }
+       
+        // Console Toggle (Grave/tilde) should work even when console is open
+        if (ke.keyScancode == SDL_SCANCODE_GRAVE) {
+            m_console.toggle();
+            e.handled = true;
+            return true;
         }
+
+        // if console is open, let it consume key events FIRST
+        // Don't process other hotkeys while typing in console
+        if (m_console.isOpen()) {
+            m_console.onEvent(e);
+            return e.handled; // Stops here, do not process F1-F5 while console is open
+        }
+
+        // only process dev hotkeys if console is CLOSED
+        if (ke.keyScancode == SDL_SCANCODE_F1) {
+            bool anyOn = (m_showDevTools || m_showInspector || m_showFpsGraph);
+            m_showDevTools = !anyOn;
+            m_showInspector = !anyOn;
+            m_showFpsGraph = !anyOn;
+            e.handled = true;
+            return true;
+        }
+
+        if (ke.keyScancode == SDL_SCANCODE_F2) { m_showDevTools = !m_showDevTools; e.handled = true; return true; }
+        if (ke.keyScancode == SDL_SCANCODE_F3) { m_showInspector = !m_showInspector; e.handled = true; return true; }
+        if (ke.keyScancode == SDL_SCANCODE_F4) { m_console.toggle(); e.handled = true; return true; }
+        if (ke.keyScancode == SDL_SCANCODE_F5) { m_showFpsGraph = !m_showFpsGraph; e.handled = true; return true; }
     }
 
-    // If console open, it consumes typing + Enter + Esc etc.
-    m_console.onEvent(e);
-    if (e.handled) return true;
+    if (m_console.isOpen()) {
+        m_console.onEvent(e);
+        if (e.handled) return true;
+    }
 
     if (e.type() == EventType::WindowResize) {
         return false;
@@ -1321,38 +1389,38 @@ void GameLayer::hotReloadShader() {
 }
 
 void GameLayer::hotReloadTileMap() {
-    if (!m_app) return;
-
+    // Load New Map    
     HBE::Renderer::TileMap newMap{};
     std::string err;
-
-    if (!HBE::Renderer::TileMapLoader::loadFromJsonFile(m_tileMapPath, newMap, &err)) {
-        spawnPopup(20.0f, 650.0f, "Tilemap reload FAILED: " + err,
-            HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
+    auto newMapBool = TileMapLoader::loadFromJsonFile(m_tileMapPath, newMap, &err);
+    if (!newMapBool) {
+        LogError("TileMap hot-reload: failed to load " + m_tileMapPath);
+        spawnPopup(20.0f, 650.0f, "Tilemap reload FAILED: failed to load " + m_tileMapPath, HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f,0.0f);
         return;
     }
 
-    // Swap map
+    // Check for required layers before committing
+    auto groundLayer = newMap.findLayer("Ground");
+    if (!groundLayer) {
+        LogError("TileMap hot-reload: missing required 'Ground' layer");
+        spawnPopup(20.0f, 650.0f, "Tilemap reload FAILED: missing required 'Ground' layer", HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
+        return;
+    }
+    
+    // Validations passed, safe to commit changes
     m_tileMap = std::move(newMap);
 
-    // Rebuild tile renderer
-    if (!m_tileRenderer.build(m_app->renderer2D(), m_app->resources(), m_spriteShader, m_quadMesh, m_tileMap)) {
-        spawnPopup(20.0f, 650.0f, "Tile renderer rebuild FAILED",
-            HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
-        return;
-    }
-
-    // Refresh collision layer pointer + scene collision context
+    // these should succeed
+    m_tileRenderer.build(m_app->renderer2D(), m_app->resources(), m_spriteShader, m_quadMesh, m_tileMap);
     m_collisionLayer = m_tileMap.findLayer("Ground");
-    if (!m_collisionLayer) {
-        spawnPopup(20.0f, 650.0f, "Tilemap missing layer 'Ground' after reload",
-            HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
-        return;
+
+    // update collision context
+    if (m_collisionLayer) {
+        m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
     }
 
-    m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
-
-    spawnPopup(20.0f, 650.0f, "Tilemap reloaded",
+    LogInfo("TileMap hot-reloaded succesfully: " + m_tileMapPath);
+    spawnPopup(20.0f, 650.0f, "TileMap hot-reloaded succesfully",
         HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f }, 1.25f, 0.0f);
 }
 

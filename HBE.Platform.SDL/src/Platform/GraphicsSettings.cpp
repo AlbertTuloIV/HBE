@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <stdexcept>
 
 namespace HBE::Platform {
 
@@ -68,10 +69,20 @@ namespace HBE::Platform {
 			std::string val = Trim(line.substr(eqPos + 1));
 
 			if (key == "width") {
-				result.width = std::max(1, std::stoi(val));
+				try {
+					result.width = std::max(1, std::stoi(val));
+				}
+				catch (const std::exception&) {
+					//skip invalid value keep default
+				}
 			}
 			else if (key == "height") {
-				result.height = std::max(1, std::stoi(val));
+				try {
+					result.height = std::max(1, std::stoi(val));
+				}
+				catch (const std::exception&) {
+					// skip invalid value keep default
+				}
 			}
 			else if (key == "mode") {
 				result.mode = ParseWindowMode(val, result.mode);
@@ -80,7 +91,12 @@ namespace HBE::Platform {
 				result.vsync = ToBool(val, result.vsync);
 			}
 			else if (key == "target_fps") {
-				result.targetFPS = std::max(0, std::stoi(val));
+				try {
+					result.targetFPS = std::max(0, std::stoi(val));
+				}
+				catch (const std::exception&) {
+					// skip invalid value, keep default.
+				}
 			}
 		}
 		out = result;

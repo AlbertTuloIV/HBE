@@ -8,6 +8,7 @@ namespace HBE::Renderer::UI{
 
 	// FNV-1a 32-bit
 	std::uint32_t UIContext::hashId(const char* s) {
+		if (!s) return 0;
 		std::uint32_t h = 2166136261u;
 		while (*s) {
 			h ^= (unsigned char)(*s++);
@@ -195,6 +196,7 @@ namespace HBE::Renderer::UI{
 	}
 
 	void UIContext::label(const char* text, bool muted) {
+		if (!text) return;
 		if (m_panels.empty() || !m_text || !m_r2d) return;
 
 		auto& p = m_panels.back();
@@ -229,6 +231,7 @@ namespace HBE::Renderer::UI{
 	}
 
 	bool UIContext::buttonRect(const char* id, const UIRect& rect, const char* text) {
+		if (!id) return false;
 		const std::uint32_t hid = hashId(id);
 		return buttonInternal(hid, rect, text);
 	}
