@@ -34,7 +34,7 @@
           "name": "GoblinTest"
         },
         "Sprite2D": {
-          "layer": 50,
+          "layer": 100,
           "material": "goblin_mat",
           "mesh": "quad",
           "sortKey": 95.0,
@@ -55,7 +55,7 @@
         }
       },
       "name": "Goblin",
-      "uuid": "374e64a91050bf303af0fd65b45fff48"
+      "uuid": "7437fbc31ee798d83a79e731c5792cb2"
     },
     {
       "components": {
@@ -77,28 +77,28 @@
           "enableOneWay": true,
           "enableSlopes": true,
           "gravityScale": 1.0,
-          "grounded": false,
-          "isStatic": true,
+          "grounded": true,
+          "isStatic": false,
           "linearDamping": 0.0,
           "maxFallSpeed": -2200.0,
           "maxStepUp": 22.399999618530273,
           "oneWayDisableTimer": 0.0,
-          "useGravity": false,
-          "velX": -520.0,
+          "useGravity": true,
+          "velX": 0.0,
           "velY": 0.0
         },
         "Script": {
           "name": "PlayerController"
         },
         "Sprite2D": {
-          "layer": 50,
+          "layer": 200,
           "material": "soldier_mat",
           "mesh": "quad",
           "sortKey": 95.0,
           "sortOffsetY": 0.0,
           "uvRect": [
-            0.7777777910232544,
-            0.7142857313156128,
+            0.0,
+            0.8571428656578064,
             0.1111111119389534,
             0.1428571492433548
           ]
@@ -107,12 +107,12 @@
           "rot": 0.0,
           "sx": 400.0,
           "sy": 400.0,
-          "x": 563.184326171875,
+          "x": 64.0,
           "y": 90.0
         }
       },
       "name": "Player",
-      "uuid": "928936b76b5f8000505b542b81663b4c"
+      "uuid": "1d0a8369fba1257772989e5562fafc7b"
     }
   ],
   "tilemap": "assets/maps/test_map.json",

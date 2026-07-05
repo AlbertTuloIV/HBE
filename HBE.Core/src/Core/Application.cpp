@@ -32,11 +32,13 @@ namespace HBE::Core {
 
 		if (!m_gl.initialize(m_platform)) {
 			LogError("Application: GLRenderer init failed.");
+			m_platform.shutdown();
 			return false;
 		}
 
 		if (!m_audio.initialize()) {
 			LogError("Application: Audio init failed.");
+			m_platform.shutdown();
 			return false;
 		}
 
@@ -333,7 +335,8 @@ namespace HBE::Core {
 			prevTime = now;
 
 			// update
-			for (auto& layer : m_layers) {
+			for (std::size_t i = 0; i < m_layers.m_layers.size(); ++i) {
+				auto& layer = m_layers.m_layers[i];
 				if (layer) layer->onUpdate(dt);
 			}
 			// keep audio spatialization / finished-track cleanup fresh
@@ -345,7 +348,8 @@ namespace HBE::Core {
 			// 2) Render scene only inside the letterboxed viewport
 			m_gl.beginFrameInViewport(m_vpX, m_vpY, m_vpW, m_vpH);
 
-			for (auto& layer : m_layers) {
+			for (std::size_t i = 0; i < m_layers.m_layers.size(); ++i) {
+				auto& layer = m_layers.m_layers[i];
 				if (layer) layer->onRender();
 			}
 

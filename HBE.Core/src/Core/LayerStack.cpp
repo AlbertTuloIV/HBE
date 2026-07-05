@@ -54,11 +54,19 @@ namespace HBE::Core {
 	}
 
 	void LayerStack::dispatchEvent(Event& e) {
-		// overlays should get first shot so iterate reverse
-		for (auto it = m_layers.rbegin(); it != m_layers.rend(); ++it) {
-			if (!(*it)) continue;
+		// Take a snapshot of layer pointers to avoid invalidation if handlers modify the stack
+		std::vector<Layer*> snapshot;
+		snapshot.reserve(m_layers.size());
+		for (auto& layer : m_layers) {
+			if (layer) snapshot.push_back(layer.get());
+		}
 
-			if ((*it)->onEvent(e)) {
+		// overlays should get first shot so iterate reverse
+		for (auto it = snapshot.rbegin(); it != snapshot.rend(); ++it) {
+			Layer* layer = *it;
+			if (!layer) continue;
+
+			if (layer->onEvent(e)) {
 				e.handled = true;
 			}
 

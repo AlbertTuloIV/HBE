@@ -160,7 +160,7 @@ namespace HBE::Platform {
         void cleanupFinishedVoicesLocked();
         void destroyVoiceLocked(VoiceHandle handle);
         void applyBusGainsLocked();
-        void applyPositionalLocked(VoiceEntry& voice);
+        bool applyPositionalLocked(VoiceEntry& voice);
 
         static float clamp01(float v);
         static float clampNonNegative(float v);

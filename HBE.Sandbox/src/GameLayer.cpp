@@ -704,30 +704,6 @@ void GameLayer::onUpdate(float dt) {
         m_app->audio().resumeBus(HBE::Platform::Audio::Bus::SFX);
     }
 
-    // Play test sound on T key press
-    // Quick audio test keys
-    if (KeyPressed(SDL_SCANCODE_T)) {
-        HBE::Platform::Audio::PlayParams p;
-        p.bus = HBE::Platform::Audio::Bus::SFX;
-        p.gain = 1.0f;
-        p.positional = true;
-        p.worldX = playerTr->posX + 120.0f; // sound slightly to the right
-        p.worldY = playerTr->posY;
-        p.minDistance = 10.0f;
-        p.maxDistance = 350.0f;
-        p.panRange = 240.0f;
-
-        m_app->audio().playSoundEx("hit", p);
-    }
-
-    if (KeyPressed(SDL_SCANCODE_Y)) {
-        m_app->audio().pauseBus(HBE::Platform::Audio::Bus::SFX);
-    }
-
-    if (KeyPressed(SDL_SCANCODE_U)) {
-        m_app->audio().resumeBus(HBE::Platform::Audio::Bus::SFX);
-    }
-
     // ---- stats ----
     m_uiAnimT += dt;
     m_statTimer += (double)dt;
@@ -1305,7 +1281,7 @@ void GameLayer::onRender() {
     con.w = LOGICAL_WIDTH - 40.0f;
     con.h = 170.0f;
 
-    m_console.draw(m_ui, con);
+    m_console.draw(m_ui, con, m_lastDt);
     
     r2d.endScene();
 
@@ -1321,36 +1297,41 @@ bool GameLayer::onEvent(HBE::Core::Event& e) {
     // Toggle console with ~ (grave)
     if (e.type() == EventType::KeyPressed) {
         auto& ke = static_cast<KeyPressedEvent&>(e);
-        if (!ke.repeat) {
-
-            // ~ toggles console
-            if (ke.keyScancode == SDL_SCANCODE_GRAVE) {
-                m_console.toggle();
-                e.handled = true;
-                return true;
-            }
-
-            // F1 toggles all dev windows
-            if (ke.keyScancode == SDL_SCANCODE_F1) {
-                bool anyOn = (m_showDevTools || m_showInspector || m_showFpsGraph);
-                m_showDevTools = !anyOn;
-                m_showInspector = !anyOn;
-                m_showFpsGraph = !anyOn;
-                e.handled = true;
-                return true;
-            }
-
-            // Individual toggles
-            if (ke.keyScancode == SDL_SCANCODE_F2) { m_showDevTools = !m_showDevTools; e.handled = true; return true; }
-            if (ke.keyScancode == SDL_SCANCODE_F3) { m_showInspector = !m_showInspector; e.handled = true; return true; }
-            if (ke.keyScancode == SDL_SCANCODE_F4) { m_console.toggle(); e.handled = true; return true; }
-            if (ke.keyScancode == SDL_SCANCODE_F5) { m_showFpsGraph = !m_showFpsGraph; e.handled = true; return true; }
+       
+        // Console Toggle (Grave/tilde) should work even when console is open
+        if (ke.keyScancode == SDL_SCANCODE_GRAVE) {
+            m_console.toggle();
+            e.handled = true;
+            return true;
         }
+
+        // if console is open, let it consume key events FIRST
+        // Don't process other hotkeys while typing in console
+        if (m_console.isOpen()) {
+            m_console.onEvent(e);
+            return e.handled; // Stops here, do not process F1-F5 while console is open
+        }
+
+        // only process dev hotkeys if console is CLOSED
+        if (ke.keyScancode == SDL_SCANCODE_F1) {
+            bool anyOn = (m_showDevTools || m_showInspector || m_showFpsGraph);
+            m_showDevTools = !anyOn;
+            m_showInspector = !anyOn;
+            m_showFpsGraph = !anyOn;
+            e.handled = true;
+            return true;
+        }
+
+        if (ke.keyScancode == SDL_SCANCODE_F2) { m_showDevTools = !m_showDevTools; e.handled = true; return true; }
+        if (ke.keyScancode == SDL_SCANCODE_F3) { m_showInspector = !m_showInspector; e.handled = true; return true; }
+        if (ke.keyScancode == SDL_SCANCODE_F4) { m_console.toggle(); e.handled = true; return true; }
+        if (ke.keyScancode == SDL_SCANCODE_F5) { m_showFpsGraph = !m_showFpsGraph; e.handled = true; return true; }
     }
 
-    // If console open, it consumes typing + Enter + Esc etc.
-    m_console.onEvent(e);
-    if (e.handled) return true;
+    if (m_console.isOpen()) {
+        m_console.onEvent(e);
+        if (e.handled) return true;
+    }
 
     if (e.type() == EventType::WindowResize) {
         return false;
@@ -1408,38 +1389,38 @@ void GameLayer::hotReloadShader() {
 }
 
 void GameLayer::hotReloadTileMap() {
-    if (!m_app) return;
-
+    // Load New Map    
     HBE::Renderer::TileMap newMap{};
     std::string err;
-
-    if (!HBE::Renderer::TileMapLoader::loadFromJsonFile(m_tileMapPath, newMap, &err)) {
-        spawnPopup(20.0f, 650.0f, "Tilemap reload FAILED: " + err,
-            HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
+    auto newMapBool = TileMapLoader::loadFromJsonFile(m_tileMapPath, newMap, &err);
+    if (!newMapBool) {
+        LogError("TileMap hot-reload: failed to load " + m_tileMapPath);
+        spawnPopup(20.0f, 650.0f, "Tilemap reload FAILED: failed to load " + m_tileMapPath, HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f,0.0f);
         return;
     }
 
-    // Swap map
+    // Check for required layers before committing
+    auto groundLayer = newMap.findLayer("Ground");
+    if (!groundLayer) {
+        LogError("TileMap hot-reload: missing required 'Ground' layer");
+        spawnPopup(20.0f, 650.0f, "Tilemap reload FAILED: missing required 'Ground' layer", HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
+        return;
+    }
+    
+    // Validations passed, safe to commit changes
     m_tileMap = std::move(newMap);
 
-    // Rebuild tile renderer
-    if (!m_tileRenderer.build(m_app->renderer2D(), m_app->resources(), m_spriteShader, m_quadMesh, m_tileMap)) {
-        spawnPopup(20.0f, 650.0f, "Tile renderer rebuild FAILED",
-            HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
-        return;
-    }
-
-    // Refresh collision layer pointer + scene collision context
+    // these should succeed
+    m_tileRenderer.build(m_app->renderer2D(), m_app->resources(), m_spriteShader, m_quadMesh, m_tileMap);
     m_collisionLayer = m_tileMap.findLayer("Ground");
-    if (!m_collisionLayer) {
-        spawnPopup(20.0f, 650.0f, "Tilemap missing layer 'Ground' after reload",
-            HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
-        return;
+
+    // update collision context
+    if (m_collisionLayer) {
+        m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
     }
 
-    m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
-
-    spawnPopup(20.0f, 650.0f, "Tilemap reloaded",
+    LogInfo("TileMap hot-reloaded succesfully: " + m_tileMapPath);
+    spawnPopup(20.0f, 650.0f, "TileMap hot-reloaded succesfully",
         HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f }, 1.25f, 0.0f);
 }
 

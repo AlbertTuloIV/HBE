@@ -20,9 +20,7 @@ namespace HBE::Renderer {
 
         GLRenderer(const GLRenderer&) = delete;
         GLRenderer& operator=(const GLRenderer&) = delete;
-
-        GLShader* getBasicShader() const { return nullptr; } // or remove if unused
-
+                
         // Must be called after SDLPlatform has created a GL context.
         bool initialize(HBE::Platform::SDLPlatform& platform);
 

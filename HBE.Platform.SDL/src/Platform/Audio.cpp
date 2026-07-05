@@ -74,6 +74,9 @@ namespace HBE::Platform {
 
         for (auto& [handle, voice] : m_activeVoices) {
             if (voice.track) {
+                // Clear callback first — MIX_StopTrack can fire it synchronously,
+                // which would deadlock trying to re-acquire m_mutex.
+                MIX_SetTrackStoppedCallback(voice.track, nullptr, nullptr);
                 MIX_StopTrack(voice.track, 0);
                 MIX_DestroyTrack(voice.track);
                 voice.track = nullptr;
@@ -175,6 +178,14 @@ namespace HBE::Platform {
         auto it = m_sounds.find(name);
         if (it == m_sounds.end()) return false;
 
+        // Check if any active voice is using this sound
+        for (const auto& [handle, voice] : m_activeVoices) {
+            if (voice.assetName == name && !voice.isMusic) {
+                LogWarn("Audio: cannot unload sound '" + name + "' while active voices reference it.");
+                return false;
+            }
+        }
+
         if (it->second.audio) {
             MIX_DestroyAudio(it->second.audio);
         }
@@ -188,6 +199,14 @@ namespace HBE::Platform {
 
         auto it = m_music.find(name);
         if (it == m_music.end()) return false;
+
+        // Check if any active voice is using this music.
+        for (const auto& [handle, voice] : m_activeVoices) {
+            if (voice.assetName == name && voice.isMusic) {
+                LogWarn("Audio: Cannot unload music '" + name + "' while active voices reference it");
+                return false;
+            }
+        }
 
         if (it->second.audio) {
             MIX_DestroyAudio(it->second.audio);
@@ -364,69 +383,84 @@ namespace HBE::Platform {
     }
 
     void Audio::pauseAll() {
-        std::scoped_lock lock(m_mutex);
-
-        for (auto& [handle, voice] : m_activeVoices) {
-            if (voice.track) {
-                MIX_PauseTrack(voice.track);
+        // Collect tracks under the lock, then call SDL_mixer outside it.
+        // Holding m_mutex while calling MIX_* would invert the lock order with
+        // SDL_mixer's internal audio lock (audio thread: audio lock → m_mutex;
+        // main thread: m_mutex → audio lock → deadlock).
+        std::vector<MIX_Track*> tracks;
+        {
+            std::scoped_lock lock(m_mutex);
+            tracks.reserve(m_activeVoices.size());
+            for (auto& [handle, voice] : m_activeVoices) {
+                if (voice.track) tracks.push_back(voice.track);
             }
         }
+        for (auto* t : tracks) MIX_PauseTrack(t);
     }
 
     void Audio::resumeAll() {
-        std::scoped_lock lock(m_mutex);
-
-        for (auto& [handle, voice] : m_activeVoices) {
-            if (voice.track) {
-                MIX_ResumeTrack(voice.track);
+        std::vector<MIX_Track*> tracks;
+        {
+            std::scoped_lock lock(m_mutex);
+            tracks.reserve(m_activeVoices.size());
+            for (auto& [handle, voice] : m_activeVoices) {
+                if (voice.track) tracks.push_back(voice.track);
             }
         }
+        for (auto* t : tracks) MIX_ResumeTrack(t);
     }
 
     void Audio::pauseBus(Bus bus) {
-        std::scoped_lock lock(m_mutex);
+        // No m_mutex: m_mixer is main-thread-only (init/shutdown). Holding
+        // m_mutex here while SDL_mixer acquires its audio lock is the deadlock path.
         if (m_mixer) {
             MIX_PauseTag(m_mixer, busTag(bus));
         }
     }
 
     void Audio::resumeBus(Bus bus) {
-        std::scoped_lock lock(m_mutex);
         if (m_mixer) {
             MIX_ResumeTag(m_mixer, busTag(bus));
         }
     }
 
     void Audio::stopBus(Bus bus) {
-        std::scoped_lock lock(m_mutex);
         if (m_mixer) {
             MIX_StopTag(m_mixer, busTag(bus), 0);
         }
     }
 
     void Audio::setMasterGain(float gain) {
-        std::scoped_lock lock(m_mutex);
-        m_masterGain = clampNonNegative(gain);
-        applyBusGainsLocked();
+        gain = clampNonNegative(gain);
+        {
+            std::scoped_lock lock(m_mutex);
+            m_masterGain = gain;
+        }
+        if (m_mixer) {
+            MIX_SetMixerGain(m_mixer, gain);
+        }
     }
 
     void Audio::setBusGain(Bus bus, float gain) {
-        std::scoped_lock lock(m_mutex);
-
         gain = clampNonNegative(gain);
-
-        switch (bus) {
-        case Bus::Music:   m_musicGain = gain; break;
-        case Bus::SFX:     m_sfxGain = gain; break;
-        case Bus::UI:      m_uiGain = gain; break;
-        case Bus::Ambient: m_ambientGain = gain; break;
-        case Bus::Master:
-        default:
-            m_masterGain = gain;
-            break;
+        {
+            std::scoped_lock lock(m_mutex);
+            switch (bus) {
+            case Bus::Music:   m_musicGain = gain; break;
+            case Bus::SFX:     m_sfxGain = gain;   break;
+            case Bus::UI:      m_uiGain = gain;     break;
+            case Bus::Ambient: m_ambientGain = gain; break;
+            case Bus::Master:
+            default:           m_masterGain = gain; break;
+            }
         }
-
-        applyBusGainsLocked();
+        if (m_mixer) {
+            if (bus == Bus::Master) {
+                MIX_SetMixerGain(m_mixer, gain);
+            } else {
+                MIX_SetTagGain(m_mixer, busTag(bus), gain);
+            }
+        }
     }
 
     float Audio::busGain(Bus bus) const {
@@ -453,11 +487,19 @@ namespace HBE::Platform {
 
         cleanupFinishedVoicesLocked();
 
+        std::vector<VoiceHandle> toDestroy;
+
         for (auto& [handle, voice] : m_activeVoices) {
             if (!voice.track) continue;
             if (voice.positional) {
-                applyPositionalLocked(voice);
+                if (!applyPositionalLocked(voice)) {
+                    toDestroy.push_back(handle);
+                }
             }
+        }
+
+        for (VoiceHandle h : toDestroy) {
+            destroyVoiceLocked(h);
         }
     }
 
@@ -516,6 +558,9 @@ namespace HBE::Platform {
         if (it == m_activeVoices.end()) return;
 
         if (it->second.track) {
+            // Clear the callback BEFORE stopping to avoid re-entering the mutex
+            // if SDL fires onTrackStopped synchronously on this thread.
+            MIX_SetTrackStoppedCallback(it->second.track, nullptr, nullptr);
             MIX_StopTrack(it->second.track, 0);
             MIX_DestroyTrack(it->second.track);
             it->second.track = nullptr;
@@ -552,16 +597,15 @@ namespace HBE::Platform {
         }
     }
 
-    void Audio::applyPositionalLocked(VoiceEntry& voice) {
-        if (!voice.track) return;
+    bool Audio::applyPositionalLocked(VoiceEntry& voice) {
+        if (!voice.track) return true;  // Already invalid, but don't mark for removal
 
         const float dx = voice.worldX - m_listenerX;
         const float dy = voice.worldY - m_listenerY;
         const float distance = std::sqrt(dx * dx + dy * dy);
 
         if (voice.stopWhenTooFar && distance >= voice.maxDistance) {
-            destroyVoiceLocked(voice.handle);
-            return;
+            return false; // caller (update) will destroy after the loop finishes
         }
 
         float attenuation = 1.0f;
@@ -591,6 +635,8 @@ namespace HBE::Platform {
         if (!MIX_SetTrackStereo(voice.track, &stereo)) {
             LogWarn(std::string("Audio: MIX_SetTrackStereo failed: ") + SDL_GetError());
         }
+
+        return true;
     }
 
 } // namespace HBE::Platform

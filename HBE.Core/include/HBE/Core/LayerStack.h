@@ -16,6 +16,8 @@ namespace HBE::Core {
 		LayerStack() = default;
 		~LayerStack() = default;
 
+		std::vector<std::unique_ptr<Layer>> m_layers;
+
 		void pushLayer(std::unique_ptr<Layer> layer, Application& app);
 		void pushOverlay(std::unique_ptr<Layer> overlay, Application& app);
 
@@ -34,7 +36,6 @@ namespace HBE::Core {
 		auto rend() { return m_layers.rend(); }
 
 	private:
-		std::vector<std::unique_ptr<Layer>> m_layers;
 		std::size_t m_insertIndex = 0; // Layers go before overlays
 	};
 }

@@ -1,3 +1,5 @@
+#include "HBE/Core/Log.h"
+
 #include "HBE/Renderer/Texture2D.h"
 
 #include <glad/glad.h>
@@ -23,6 +25,11 @@ namespace HBE::Renderer {
     }
 
     bool Texture2D::createChecker(int width, int height) {
+        if (width <= 0 || height <= 0) {
+            HBE::Core::LogError("Texture2D::createChecker: invalid dimensions " + std::to_string(width) + "x" + std::to_string(height));
+            return false;
+        }
+
         destroy();
 
         m_width = width;
@@ -72,6 +79,15 @@ namespace HBE::Renderer {
     }
 
     bool Texture2D::createFromRGBA(int width, int height, const unsigned char* rgbaPixels) {
+        if (!rgbaPixels) {
+            HBE::Core::LogError("Texture2D::createFromRGBA: null pixel data");
+            return false;
+        }
+        if (width <= 0 || height <= 0) {
+            HBE::Core::LogError("Texture2D::createdFromRGBA: invalid dimensions " + std::to_string(width) + "x" + std::to_string(height));
+            return false;
+        }
+
         destroy();
 
         m_width = width;
@@ -118,7 +134,13 @@ namespace HBE::Renderer {
             return false;
         }
 
-        // ?? Store size for later UV / frame calculations
+        if (width <= 0 || height <= 0) {
+            HBE::Core::LogError("Texture2D::loadFromFile: invalid dimensions in " + path);
+            stbi_image_free(data);
+            return false;
+        }
+
+        // ?? Store size for later UV / frame calculations        
         m_width = width;
         m_height = height;
 
