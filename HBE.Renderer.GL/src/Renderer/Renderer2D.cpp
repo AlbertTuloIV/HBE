@@ -52,6 +52,10 @@ namespace HBE::Renderer {
 		m_backend.draw(item);
 	}
 
+	void Renderer2D::drawDirect(const RenderItem& item) {
+		m_backend.draw(item);
+	}
+
 	Renderer2D::Renderer2DStats Renderer2D::getStats() const {
 		Renderer2DStats s{};
 		if (m_batch) {

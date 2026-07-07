@@ -4,7 +4,10 @@
 #include <fstream>
 #include <sstream>
 #include <cctype>
+#include <cmath>
+#include <algorithm>
 #include <json.hpp>
+#include <stb_image.h>
 
 using json = nlohmann::json;
 
@@ -161,6 +164,75 @@ namespace HBE::Renderer {
         }
 
         outMap = std::move(map);
+        return true;
+    }
+
+    bool TileMapLoader::sampleTileTopColors(
+        const TileMap& map,
+        std::unordered_map<int, std::array<float, 4>>& outColors,
+        int topRowsToSample)
+    {
+        outColors.clear();
+        if (map.tilesets.empty()) return false;
+        if (topRowsToSample <= 0) topRowsToSample = 1;
+
+        const auto& ts = map.tilesets[0];
+        if (ts.tileW <= 0 || ts.tileH <= 0) return false;
+
+        // Sample from the raw image top-down so raw pixel (x,0) is the visual top of the atlas.
+        stbi_set_flip_vertically_on_load(0);
+
+        int w = 0, h = 0, ch = 0;
+        unsigned char* data = stbi_load(ts.texturePath.c_str(), &w, &h, &ch, 4);
+        if (!data) return false;
+
+        const int strideX = ts.tileW + ts.spacing;
+        const int strideY = ts.tileH + ts.spacing;
+        const int usableW = w - 2 * ts.margin;
+        const int usableH = h - 2 * ts.margin;
+        const int cols = (strideX > 0) ? std::max(1, usableW / strideX) : 1;
+        const int rows = (strideY > 0) ? std::max(1, usableH / strideY) : 1;
+
+        const int sampleRows = std::min(topRowsToSample, ts.tileH);
+
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < cols; ++c) {
+                const int atlasIdx = r * cols + c;
+                const int tileId = atlasIdx + 1; // tile IDs are 1-based
+
+                const int px0 = ts.margin + c * strideX;
+                const int py0 = ts.margin + r * strideY;
+
+                double ar = 0.0, ag = 0.0, ab = 0.0;
+                int count = 0;
+
+                for (int dy = 0; dy < sampleRows; ++dy) {
+                    for (int dx = 0; dx < ts.tileW; ++dx) {
+                        const int x = px0 + dx;
+                        const int y = py0 + dy;
+                        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                        const int idx = (y * w + x) * 4;
+                        const unsigned char a = data[idx + 3];
+                        if (a < 8) continue; // skip transparent pixels
+                        ar += data[idx + 0];
+                        ag += data[idx + 1];
+                        ab += data[idx + 2];
+                        ++count;
+                    }
+                }
+
+                if (count > 0) {
+                    std::array<float, 4> col{};
+                    col[0] = (float)(ar / count) / 255.0f;
+                    col[1] = (float)(ag / count) / 255.0f;
+                    col[2] = (float)(ab / count) / 255.0f;
+                    col[3] = 1.0f;
+                    outColors.emplace(tileId, col);
+                }
+            }
+        }
+
+        stbi_image_free(data);
         return true;
     }
 

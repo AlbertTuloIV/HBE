@@ -1,5 +1,6 @@
 #pragma once
 #include "DevConsole.h"
+#include "ParticleEffects.h"
 
 #include "HBE/Core/Layer.h"
 #include "HBE/Core/FileWatcher.h"
@@ -15,7 +16,10 @@
 #include "HBE/Renderer/TileCollision.h"
 #include "HBE/Renderer/TextRenderer2D.h"
 #include "HBE/Renderer/UI/UIContext.h"
+#include "HBE/Renderer/ParticleSystem.h"
 
+#include <array>
+#include <unordered_map>
 #include <vector>
 #include <string>
 
@@ -26,6 +30,7 @@ public:
 	void onAttach(HBE::Core::Application& app) override;
 	void onUpdate(float dt) override;
 	void onRender() override;
+	void onDetach() override;
 
 	HBE::Renderer::DebugDraw2D m_debug{};
 	HBE::Renderer::TextRenderer2D m_text{};
@@ -51,6 +56,7 @@ public:
 
 private:
 	HBE::Renderer::UI::UIContext m_ui{};
+	HBE::Renderer::ParticleSystem m_particles{};
 	HBE::Core::FileWatcher m_watcher{};
 
 	// Hot reload targets (relative to working directory)
@@ -97,6 +103,20 @@ private:
 
 	HBE::Renderer::EntityID m_goblinEntity = HBE::Renderer::InvalidEntityID;
 	HBE::Renderer::EntityID m_soldierEntity = HBE::Renderer::InvalidEntityID;
+
+	HBE::Renderer::ParticleHandle m_rainHandle = HBE::Renderer::kInvalidParticle;
+
+	// Set to true after the first onUpdate pre-warms the rain emitter (see onUpdate).
+	bool m_rainPreWarmed = false;
+
+	// Cached average color of the top rows of pixels of each tile ID (from tileset 0).
+	// Used to tint the player dust particles based on the tile the player is standing on.
+	std::unordered_map<int, std::array<float, 4>> m_tileTopColors;
+
+	// Cooldown (seconds) between successive player-dust bursts while grounded + moving.
+	float m_playerDustCooldown = 0.0f;
+
+	void spawnPlayerDustAtFeet(float feetX, float feetY);
 
 	DevConsole m_console{};
 
