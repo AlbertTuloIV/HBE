@@ -156,6 +156,17 @@ void GameLayer::onAttach(Application& app) {
 
     buildSpritePipeline();
 
+    // ── Particle System ────────────────────────────────────────────────────────
+    m_particles.initialize(app.resources(), m_quadMesh);
+
+    m_particles.registerEffect("rain", makeRain());
+    m_particles.registerEffect("player_dust", makePlayerDust());
+
+    // Rain is always active. Emitter is a rectangle centred on the camera each frame so drops
+    // spawn throughout the visible area (not just at the top edge). The first onUpdate frame
+    // pre-warms it so the world starts already populated with drops at every height.
+    m_rainHandle = m_particles.spawnManaged("rain", m_camera.x, m_camera.y);
+
     HBE::Renderer::UI::UIStyle style;
     style.textScale = 1.0f;
     style.itemH = 34.0f;
@@ -190,6 +201,11 @@ void GameLayer::onAttach(Application& app) {
         LogFatal("Tilemap missing collision layer named 'Ground'");
         m_app->requestQuit();
         return;
+    }
+
+    // Sample the top-of-tile colors used to tint the player-dust particles.
+    if (!HBE::Renderer::TileMapLoader::sampleTileTopColors(m_tileMap, m_tileTopColors)) {
+        HBE::Core::LogInfo("TileMapLoader::sampleTileTopColors failed; player dust will use fallback color.");
     }
 
     // Hook Scene2D physics/collision to this tilemap layer
@@ -598,7 +614,7 @@ void main() {
     SpriteRenderer2D::setFrame(goblin, m_goblinSheet, 0, 0);
     SpriteRenderer2D::setFrame(soldier, m_soldierSheet, 0, 0);
 
-    m_goblinEntity = m_scene.createEntity(goblin);
+    m_goblinEntity  = m_scene.createEntity(goblin);
     m_soldierEntity = m_scene.createEntity(soldier);
 
     // -----------------------------
@@ -897,13 +913,59 @@ void GameLayer::onUpdate(float dt) {
         const float px = tr ? tr->posX : m_camera.x;
         const float py = tr ? tr->posY : m_camera.y;
 
-        if (ev == "footstep") {
-            spawnPopup(px, py - 30.0f, "step", Color4{ 0.8f,0.9f,1.0f,1.0f }, 0.35f, 35.0f);
-        }
-        else if (ev == "hitframe") {
+        if (ev == "hitframe") {
             spawnPopup(px, py + 50.0f, "HIT!", Color4{ 1.0f,0.3f,0.2f,1.0f }, 0.55f, 25.0f);
         }
         });
+
+    // Player dust: while grounded and moving, kick up tinted dust at the feet.
+    {
+        auto& reg = m_scene.registry();
+        if (reg.has<HBE::ECS::RigidBody2D>(m_soldierEntity) &&
+            reg.has<HBE::ECS::Collider2D>(m_soldierEntity))
+        {
+            const auto& body = reg.get<HBE::ECS::RigidBody2D>(m_soldierEntity);
+            const auto& col  = reg.get<HBE::ECS::Collider2D>(m_soldierEntity);
+
+            const bool grounded = body.grounded;
+            const bool moving   = std::fabs(body.velX) > 60.0f;
+
+            if (grounded && moving) {
+                m_playerDustCooldown -= dt;
+                if (m_playerDustCooldown <= 0.0f) {
+                    const float feetX = playerTr->posX + col.offsetX;
+                    const float feetY = playerTr->posY + col.offsetY - col.halfH;
+                    spawnPlayerDustAtFeet(feetX, feetY);
+                    m_playerDustCooldown = 0.14f; // ~7 puffs per second while running
+                }
+            }
+            else {
+                m_playerDustCooldown = 0.0f; // fire immediately next time we start moving
+            }
+        }
+    }
+
+    // Keep rain centred on the camera so the spawn rectangle always covers the viewport.
+    // On the first update, snap the camera to the player first so the pre-warm samples the
+    // right area — otherwise the emitter (and all pre-warmed drops) end up at the world origin.
+    if (!m_rainPreWarmed) {
+        m_camera.x = playerTr->posX;
+        m_camera.y = playerTr->posY;
+        m_app->gl().setCamera(m_camera);
+    }
+
+    if (m_particles.isAlive(m_rainHandle))
+        m_particles.setPosition(m_rainHandle, m_camera.x, m_camera.y);
+
+    if (!m_rainPreWarmed) {
+        // Simulate ~2 seconds so the world starts already populated with drops at every height.
+        for (int i = 0; i < 60; ++i) {
+            m_particles.update(1.0f / 30.0f);
+        }
+        m_rainPreWarmed = true;
+    }
+
+    m_particles.update(dt);
 
     // camera follow
     m_camera.x = playerTr->posX;
@@ -970,6 +1032,9 @@ void GameLayer::onRender() {
 
     // draw sprites/entities
     m_scene.render(r2d);
+
+    // ── Particles (above sprites at layer 200) ─────────────────────────────────
+    m_particles.render(r2d);
 
     // debug draw (WORLD)
     if (m_debugDraw) {
@@ -1287,6 +1352,47 @@ void GameLayer::spawnPopup(float x, float y, const std::string& text,
     m_popups.push_back(std::move(p));
 }
 
+void GameLayer::spawnPlayerDustAtFeet(float feetX, float feetY) {
+    using namespace HBE::Renderer;
+
+    // Fallback dust color if we can't sample the tile below the player.
+    float r = 0.82f, g = 0.72f, b = 0.55f;
+
+    if (m_collisionLayer) {
+        const float tw = m_tileMap.worldTileW();
+        const float th = m_tileMap.worldTileH();
+
+        if (tw > 0.0f && th > 0.0f) {
+            const int tx = (int)std::floor(feetX / tw);
+            // Sample slightly below the feet so we hit the tile the player is standing on rather
+            // than the empty space they occupy. Then walk down a couple of tiles in case the very
+            // top row is a one-way / slope with a transparent leading edge.
+            const int ty0 = (int)std::floor((feetY - 0.5f) / th);
+            int tileId = 0;
+            for (int probe = 0; probe < 3 && tileId == 0; ++probe) {
+                tileId = m_collisionLayer->at(tx, ty0 - probe);
+            }
+            if (tileId != 0) {
+                auto it = m_tileTopColors.find(tileId);
+                if (it != m_tileTopColors.end()) {
+                    r = it->second[0];
+                    g = it->second[1];
+                    b = it->second[2];
+                }
+            }
+        }
+    }
+
+    // Re-register player_dust with the tinted colors. ParticleSystem copies the config on spawn,
+    // so this cheap swap changes only the next burst's colors.
+    EmitterConfig cfg = makePlayerDust()[0];
+    cfg.startR = r;         cfg.startG = g;         cfg.startB = b;
+    cfg.endR   = r * 0.55f; cfg.endG   = g * 0.55f; cfg.endB   = b * 0.55f;
+    m_particles.registerEffect("player_dust", cfg);
+
+    m_particles.spawn("player_dust", feetX, feetY);
+}
+
 void GameLayer::setupHotReloadWatches() {
     HBE::Core::FileWatcher::Options opt{};
     opt.pollIntervalSeconds = 0.20f;
@@ -1350,6 +1456,9 @@ void GameLayer::hotReloadTileMap() {
         return;
     }
 
+    // Re-sample tile top colors for the new map
+    HBE::Renderer::TileMapLoader::sampleTileTopColors(m_tileMap, m_tileTopColors);
+
     m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
 
     spawnPopup(20.0f, 650.0f, "Tilemap reloaded",
@@ -1394,4 +1503,8 @@ void GameLayer::hotReloadTextureByPath(const std::string& path) {
         spawnPopup(20.0f, 590.0f, "Texture reloaded: tiles.png",
             HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f }, 1.0f, 0.0f);
     }
+}
+
+void GameLayer::onDetach() {
+    m_particles.shutdown();
 }

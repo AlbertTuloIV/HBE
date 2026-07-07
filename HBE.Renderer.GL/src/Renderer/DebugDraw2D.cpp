@@ -71,12 +71,12 @@ namespace HBE::Renderer {
 
         m_mat.color = HBE::Renderer::Color4{ r, g, b, a };
 
-        // Save current state (so we don’t break the rest of the engine)
+        // Save current state (so we donï¿½t break the rest of the engine)
         GLint prevMode[2];
         glGetIntegerv(GL_POLYGON_MODE, prevMode);
 
         glPolygonMode(GL_FRONT_AND_BACK, filled ? GL_FILL : GL_LINE);
-        r2d.draw(item);
+        r2d.drawDirect(item);   // immediate draw â€” each rect gets its own color
 
         // Restore previous state
         glPolygonMode(GL_FRONT_AND_BACK, prevMode[0]);

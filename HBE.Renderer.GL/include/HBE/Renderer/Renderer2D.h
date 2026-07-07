@@ -37,6 +37,10 @@ namespace HBE::Renderer {
 		// draw a single 2D item
 		void draw(const RenderItem& item);
 
+		// Draw immediately, bypassing the batch (use when each item needs a unique color,
+		// e.g. per-particle rendering through DebugDraw2D).
+		void drawDirect(const RenderItem& item);
+
 	private:
 		GLRenderer& m_backend;
 		const Camera2D* m_activeCamera = nullptr;
