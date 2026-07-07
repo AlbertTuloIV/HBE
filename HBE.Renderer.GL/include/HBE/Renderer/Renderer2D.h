@@ -1,6 +1,7 @@
 #pragma once
 
 #include "HBE/Renderer/RenderItem.h"
+#include "HBE/Renderer/RenderPass.h"
 #include "HBE/Renderer/Camera2D.h"
 #include <memory>
 
@@ -20,6 +21,8 @@ namespace HBE::Renderer {
 		struct Renderer2DStats {
 			int drawCalls = 0;
 			int quads = 0;
+			int stateChanges = 0;
+			int passes = 0;
 		};
 
 		Renderer2DStats getStats() const;
@@ -27,9 +30,10 @@ namespace HBE::Renderer {
 		// Tell the renderer which mesh is the standard sprite quad ( quad_pos_uv).
 		// only draws using this mesh will be batched
 		void setSpriteQuadMesh(const Mesh* quadMesh);
-
+				
 		// set up the camera for this scene
 		void beginScene(const Camera2D& camera);
+		void beginScene(const Camera2D& camera, RenderPass pass);
 
 		// for now this is a no-op but later we can flush batches
 		void endScene();
@@ -44,11 +48,17 @@ namespace HBE::Renderer {
 	private:
 		GLRenderer& m_backend;
 		const Camera2D* m_activeCamera = nullptr;
-
 		const Mesh* m_spriteQuadMesh = nullptr;
 
 		// batching
 		std::unique_ptr<SpriteBatch2D> m_batch;
 		void ensureBatch();
+
+		RenderPass m_currentPass = RenderPass::World;
+
+		int m_frameDrawCalls = 0;
+		int m_frameQuads = 0;
+		int m_frameStateChanges = 0;
+		int m_framePasses = 0;
 	};
 }

@@ -3,6 +3,8 @@
 #include "HBE/Renderer/Transform2D.h"
 #include "HBE/Renderer/ResourceCache.h"
 #include "HBE/Renderer/Renderer2D.h"
+#include "HBE/Renderer/RenderItem.h"
+#include "HBE/Renderer/RenderPass.h"
 
 #include <algorithm>
 
@@ -24,6 +26,26 @@ namespace HBE::Renderer {
 	// -- initialize / shutdown
 	bool ParticleSystem::initialize(ResourceCache& cache, Mesh* quadMesh) {
 		m_initialized = m_debugDraw.initialize(cache, quadMesh);
+
+		m_quadMesh = quadMesh;
+		m_spriteShader = cache.getShader("sprite");
+
+		// 1x1 opaque white texture - all tinting happens via the per-vertex color
+		// attribute (baked from RenderItem::tint), so many differently-colored particles
+		// can share a single draw call.
+		static const unsigned char whitePixel[4] = { 255, 255, 255, 255 };
+		m_whiteTex = cache.getOrCreateTextureFromRGBA("particle_white_1x1", 1, 1, whitePixel);
+
+		m_matAlpha.shader  = m_spriteShader;
+		m_matAlpha.texture = m_whiteTex;
+		m_matAlpha.color   = { 1.0f, 1.0f, 1.0f, 1.0f };
+		m_matAlpha.blend   = BlendMode::Alpha;
+
+		m_matAdditive.shader  = m_spriteShader;
+		m_matAdditive.texture = m_whiteTex;
+		m_matAdditive.color   = { 1.0f, 1.0f, 1.0f, 1.0f };
+		m_matAdditive.blend   = BlendMode::Additive;
+
 		return m_initialized;
 	}
 
@@ -139,6 +161,33 @@ namespace HBE::Renderer {
 
 	// -- render
 	void ParticleSystem::render(Renderer2D& r2d) const {
+		// Batched path: submit one RenderItem per particle, all sharing the same
+		// material (alpha or additive). They collapse into 1-2 draw calls per frame
+		// because per-particle color rides on the vertex color attribute.
+		if (m_quadMesh && m_spriteShader && m_whiteTex) {
+			render(r2d, [&](float x, float y, float size, float rotation,
+				float r, float g, float b, float a, bool additive)
+				{
+					RenderItem item{};
+					item.mesh     = m_quadMesh;
+					item.material = additive ? &m_matAdditive : &m_matAlpha;
+					item.pass     = RenderPass::World;
+					item.layer    = Layers::Particles;
+
+					item.transform.posX     = x;
+					item.transform.posY     = y;
+					item.transform.scaleX   = size;
+					item.transform.scaleY   = size;
+					item.transform.rotation = rotation;
+
+					item.tint = Color4{ r, g, b, a };
+
+					r2d.draw(item);
+				});
+			return;
+		}
+
+		// Fallback: unbatched debug-draw path (used only if init failed).
 		render(r2d, [&](float x, float y, float size, float /*rotation*/,
 			float r, float g, float b, float a, bool /*additive*/)
 			{

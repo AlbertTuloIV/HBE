@@ -487,20 +487,24 @@ void GameLayer::buildSpritePipeline() {
         const char* spriteVs = R"(#version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec2 aUV;
+layout(location = 2) in vec4 aColor;
 
 out vec2 vUV;
+out vec4 vColor;
 
 uniform mat4 uMVP;
 uniform vec4 uUVRect; // xy offset, zw scale
 
 void main() {
     vUV = aUV * uUVRect.zw + uUVRect.xy;
+    vColor = aColor;
     gl_Position = uMVP * vec4(aPos, 1.0);
 }
 )";
 
         const char* spriteFs = R"(#version 330 core
 in vec2 vUV;
+in vec4 vColor;
 out vec4 FragColor;
 
 uniform sampler2D uTex;
@@ -513,14 +517,15 @@ void main() {
     vec4 tex = texture(uTex, vUV);
 
     if (uIsSDF == 0) {
-        FragColor = tex * uColor;
+        FragColor = tex * uColor * vColor;
         return;
     }
 
     float dist = tex.a;
     float w = fwidth(dist) * max(uSDFSoftness, 0.001);
     float alpha = smoothstep(0.5 - w, 0.5 + w, dist);
-    FragColor = vec4(uColor.rgb, uColor.a * alpha);
+    vec4 tinted = uColor * vColor;
+    FragColor = vec4(tinted.rgb, tinted.a * alpha);
 }
 )";
 
@@ -551,6 +556,11 @@ void main() {
         m_app->requestQuit();
         return;
     }
+
+    // Tell Renderer2D which mesh identifies a sprite-quad, so anything drawn with
+    // this mesh flows through the batch (uses the batch VAO with per-vertex color)
+    // instead of falling back to the mesh's own VAO (which lacks aColor).
+    m_app->renderer2D().setSpriteQuadMesh(m_quadMesh);
 
     // Debug draw setup (uses the same quad mesh)
     if (!m_debug.initialize(resources, m_quadMesh)) {
@@ -1064,7 +1074,7 @@ void GameLayer::onRender() {
     // -------------------------
     // PASS 1: WORLD
     // -------------------------
-    r2d.beginScene(m_camera);
+    r2d.beginScene(m_camera, HBE::Renderer::RenderPass::World);
 
     // draw map
     m_tileRenderer.draw(r2d, m_tileMap);
@@ -1141,7 +1151,7 @@ void GameLayer::onRender() {
     r2d.endScene();
 
     // -------------------------
-    // PASS 2: UI OVERLAY
+    // PASS 2: UI (widgets + panels)
     // -------------------------
     HBE::Renderer::Camera2D uiCam{};
     uiCam.x = LOGICAL_WIDTH * 0.5f;
@@ -1150,7 +1160,7 @@ void GameLayer::onRender() {
     uiCam.viewportWidth = LOGICAL_WIDTH;
     uiCam.viewportHeight = LOGICAL_HEIGHT;
 
-    r2d.beginScene(uiCam);
+    r2d.beginScene(uiCam, HBE::Renderer::RenderPass::UI);
 
     // Bind UI renderer dependencies now that we�re in UI space
     m_ui.bind(&m_app->renderer2D(), &m_debug, &m_text);
@@ -1343,6 +1353,13 @@ void GameLayer::onRender() {
         m_ui.endPanel();
     }
 
+    r2d.endScene();
+
+    // -------------------------
+    // PASS 3: OVERLAY (dev console — always on top of world + UI)
+    // -------------------------
+    r2d.beginScene(uiCam, HBE::Renderer::RenderPass::Overlay);
+
     UIRect con;
     con.x = 20.0f;
     con.y = LOGICAL_HEIGHT - 220.0f;
@@ -1350,7 +1367,7 @@ void GameLayer::onRender() {
     con.h = 170.0f;
 
     m_console.draw(m_ui, con, m_lastDt);
-    
+
     r2d.endScene();
 
     m_ui.endFrame();

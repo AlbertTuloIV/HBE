@@ -1,0 +1,13 @@
+[INFO]SDL_Init(SDL_INIT_VIDEO) rc=1 (video subsystem already initialized).
+[WARN]SDL_GL_SetSwapInterval failed: 
+[INFO]OpenGL context created successfully.
+[INFO]SDLPlatform initialized successfully.
+[INFO]OpenGL initialized via GLAD. Version 3.3
+[INFO]Audio initialized (SDL3_mixer MIX_* API).
+[INFO]Application initialized.
+[INFO]CWD: G:\Dev\HBE\HBE.Sandbox
+[INFO]Font(SDF): Loaded 'assets/fonts/BoldPixels.ttf' => 'sdf_font_ui_16'
+[INFO]Audio: loaded sound 'footstep' from assets/audio/test_sound.wav
+[INFO]Audio: loaded sound 'hit' from assets/audio/test_sound.wav
+[INFO]Audio: loaded sound 'ui_blip' from assets/audio/test_sound.wav
+[INFO]GameLayer attached.
