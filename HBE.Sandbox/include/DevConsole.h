@@ -28,7 +28,7 @@ public:
     void registerCommand(const std::string& name, const std::string& help, CommandFn fn);
 
     void onEvent(HBE::Core::Event& e);
-    void draw(HBE::Renderer::UI::UIContext& ui, const HBE::Renderer::UI::UIRect& rect);
+    void draw(HBE::Renderer::UI::UIContext& ui, const HBE::Renderer::UI::UIRect& rect, float dt);
 
 private:
     SDL_Window* m_window = nullptr;   // NEW

@@ -1,10 +1,12 @@
-#include "HBE/Input/InputMap.h"
+#include "HBE/Core/Log.h"
 
+#include "HBE/Input/InputMap.h"
 #include "HBE/Platform/Input.h"
 
 #include <fstream>
 #include <cmath>
 #include <algorithm>
+#include <cassert>
 
 namespace HBE::Input {
 
@@ -378,6 +380,10 @@ namespace HBE::Input {
 	}
 
 	InputMap& Get() {
+		if (!g_map) {
+			HBE::Core::LogFatal("HBE::Input::Get() called before Initialize() or after Shutdown()");
+			assert(false && "HBE::Input::Get() called before Initialize()");
+		}
 		return *g_map;
 	}
 

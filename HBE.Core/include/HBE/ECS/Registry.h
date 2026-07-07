@@ -152,9 +152,16 @@ namespace HBE::ECS {
         void destroy(Entity e) {
             if (!valid(e)) return;
 
-            // remove components
+            // Collect storage pinters first to avoid iterator invalidation
+            std::vector<IStorage*> storagePtrs;
+            storagePtrs.reserve(m_storages.size());
             for (auto& kv : m_storages) {
-                kv.second->onEntityDestroyed(e);
+                storagePtrs.push_back(kv.second.get());
+            }
+
+            // safe to call onEntityDestroyed
+            for (IStorage* storage : storagePtrs) {
+                storage->onEntityDestroyed(e);
             }
 
             m_alive[e] = false;
@@ -169,6 +176,13 @@ namespace HBE::ECS {
         bool has(Entity e) const {
             const auto* s = tryStorage<T>();
             return s ? s->has(e) : false;
+        }
+
+        template<typename T>
+        T* tryGet(Entity e){
+            auto* s = tryStorage<T>();
+            if (!s || !s->has(e)) return nullptr;
+            return &s->get(e);
         }
 
         template<typename T>

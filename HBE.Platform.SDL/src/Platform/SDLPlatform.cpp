@@ -59,6 +59,7 @@ namespace HBE::Platform {
 
         if (!m_window) {
             LogError(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
+            HBE::Platform::Input::Shutdown();
             SDL_Quit();
             return false;
         }
@@ -71,7 +72,13 @@ namespace HBE::Platform {
         if (config.useOpenGL) {
             if (!createGLContext(config)) {
                 LogFatal("Failed to create OpenGL context.");
-                shutdown();
+                //Explicit cleanup since m_initialized is still false
+                if (m_window) {
+                    SDL_DestroyWindow(m_window);
+                    m_window = nullptr;
+                }
+                HBE::Platform::Input::Shutdown();
+                SDL_Quit();
                 return false;
             }
         }
@@ -106,11 +113,15 @@ namespace HBE::Platform {
 
         if (!SDL_GL_MakeCurrent(m_window, m_glContext)) {
             LogError(std::string("SDL_GL_MakeCurrent failed: ") + SDL_GetError());
+            SDL_GL_DestroyContext(m_glContext);
+            m_glContext = nullptr;
             return false;
         }
 
         if (SDL_GL_GetCurrentContext() == nullptr) {
             LogError("SDL_GL_GetCurrentContext returned null after MakeCurrent!");
+            SDL_GL_DestroyContext(m_glContext);
+            m_glContext = nullptr;
             return false;
         }
 
@@ -154,10 +165,14 @@ namespace HBE::Platform {
 
     bool SDLPlatform::setWindowSize(int width, int height) {
         if (!m_window) return false;
-        m_width = width;
-        m_height = height;
 
-        SDL_SetWindowSize(m_window, width, height);
+        if (!SDL_SetWindowSize(m_window, width, height)) {
+            LogWarn(std::string("SDL_SetWindowSize failed: ") + SDL_GetError());
+            return false;
+        }
+
+        m_width = width;
+        m_height = height;              
         return true;
     }
 

@@ -1,5 +1,8 @@
+#include "HBE/Core/Log.h"
+
 #include "HBE/Renderer/Mesh.h"
 #include <glad/glad.h>
+#include <string>
 
 namespace HBE::Renderer {
 
@@ -19,6 +22,18 @@ namespace HBE::Renderer {
     }
 
     bool Mesh::create(const std::vector<float>& vertices, int vertexCount) {
+        // Validate: expects position(3) + color(3) = 6 floats per vertex
+        constexpr int STRIDE = 6;
+        const size_t expectedSize = static_cast<size_t>(vertexCount) * STRIDE;
+        if (vertices.size() < expectedSize) {
+            HBE::Core::LogError("Mesh::create: vertex buffer too small. Expected " + std::to_string(expectedSize) + " floats, got " + std::to_string(vertices.size()));
+            return false;
+        }
+        if (vertexCount <= 0) {
+            HBE::Core::LogError("Mesh::create: vertexCount must be positive");
+            return false;
+        }
+
         destroy();
 
         m_vertexCount = vertexCount;

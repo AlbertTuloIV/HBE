@@ -32,11 +32,13 @@ namespace HBE::Core {
 
 		if (!m_gl.initialize(m_platform)) {
 			LogError("Application: GLRenderer init failed.");
+			m_platform.shutdown();
 			return false;
 		}
 
 		if (!m_audio.initialize()) {
 			LogError("Application: Audio init failed.");
+			m_platform.shutdown();
 			return false;
 		}
 
@@ -169,6 +171,18 @@ namespace HBE::Core {
 			if (!kev.handled) {
 				m_layers.dispatchEvent(kev);
 			}
+			break;
+		}
+		case SDL_EVENT_WINDOW_FOCUS_LOST: {
+			// Pause gameplay-ish sounds when the app loses focus.
+			// Keep it simple for now: pause SFX + Ambient, leave Music alone if you prefer.
+			m_audio.pauseBus(HBE::Platform::Audio::Bus::SFX);
+			m_audio.pauseBus(HBE::Platform::Audio::Bus::Ambient);
+			break;
+		}
+		case SDL_EVENT_WINDOW_FOCUS_GAINED: {
+			m_audio.resumeBus(HBE::Platform::Audio::Bus::SFX);
+			m_audio.resumeBus(HBE::Platform::Audio::Bus::Ambient);
 			break;
 		}
 							   // -------- Window Resize Events ----------
@@ -321,9 +335,12 @@ namespace HBE::Core {
 			prevTime = now;
 
 			// update
-			for (auto& layer : m_layers) {
+			for (std::size_t i = 0; i < m_layers.m_layers.size(); ++i) {
+				auto& layer = m_layers.m_layers[i];
 				if (layer) layer->onUpdate(dt);
 			}
+			// keep audio spatialization / finished-track cleanup fresh
+			m_audio.update(dt);
 
 			// 1) Clear the whole window (black bars)
 			m_gl.beginFrameFullWindow(m_winW, m_winH);
@@ -331,7 +348,8 @@ namespace HBE::Core {
 			// 2) Render scene only inside the letterboxed viewport
 			m_gl.beginFrameInViewport(m_vpX, m_vpY, m_vpW, m_vpH);
 
-			for (auto& layer : m_layers) {
+			for (std::size_t i = 0; i < m_layers.m_layers.size(); ++i) {
+				auto& layer = m_layers.m_layers[i];
 				if (layer) layer->onRender();
 			}
 

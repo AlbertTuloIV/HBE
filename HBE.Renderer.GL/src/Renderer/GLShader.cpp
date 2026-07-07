@@ -1,6 +1,8 @@
 #include "HBE/Renderer/GLShader.h"
 #include "HBE/Core/Log.h"
 
+#include <SDL3/SDL.h>
+
 #include <glad/glad.h>
 #include <fstream>
 #include <sstream>
@@ -16,7 +18,9 @@ namespace HBE::Renderer {
 
     void GLShader::destroy() {
         if (m_program != 0) {
-            glDeleteProgram(m_program);
+            if (SDL_GL_GetCurrentContext() != nullptr) {
+                glDeleteProgram(m_program);
+            }
             m_program = 0;
         }
     }

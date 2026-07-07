@@ -53,8 +53,8 @@ namespace HBE::Renderer {
 
 		initGL();
 
-		// sort by material so we can draw large runs per shader/texture
-		std::sort(m_quads.begin(), m_quads.end(), materialLess);
+		// sort by layer -> material -> sortKey -> order FIRST
+		std::sort(m_quads.begin(), m_quads.end(), quadLess);
 
 		// one big stsaging buffer for up to m_maxQWuadsPerFlush quads
 		m_vertexStaging.clear();
@@ -65,9 +65,7 @@ namespace HBE::Renderer {
 
 		auto flushCurrent = [&]() {
 			if (!currentMat || currentVertexCount <= 0) return;
-
 			drawRange(currentMat, viewProj, m_vertexStaging.data(), currentVertexCount);
-
 			m_vertexStaging.clear();
 			currentVertexCount = 0;
 		};
@@ -94,7 +92,7 @@ namespace HBE::Renderer {
 
 			currentMat = q.material;
 		}
-		std::sort(m_quads.begin(), m_quads.end(), quadLess);
+
 		flushCurrent();
 	}
 

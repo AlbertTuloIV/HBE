@@ -156,7 +156,7 @@ static void DrawWrappedLine(UIContext& ui, const std::string& s, float maxW, flo
     }
 }
 
-void DevConsole::draw(UIContext& ui, const UIRect& rect) {
+void DevConsole::draw(UIContext& ui, const UIRect& rect, float dt) {
     if (!m_open) return;
 
     auto saved = ui.style();
@@ -186,7 +186,7 @@ void DevConsole::draw(UIContext& ui, const UIRect& rect) {
     ui.spacing(6.0f);
 
     // cursor blink
-    m_cursorTimer += 0.016f;
+    m_cursorTimer += dt;
     if (m_cursorTimer >= 0.5f) {
         m_cursorTimer = 0.0f;
         m_cursorOn = !m_cursorOn;
