@@ -2,6 +2,7 @@
 #include "HBE/Renderer/EmitterConfig.h"
 #include "HBE/Renderer/ParticleEmitter.h"
 #include "HBE/Renderer/DebugDraw2D.h"
+#include "HBE/Renderer/Material.h"
 #include "HBE/Renderer/Scene2D.h"   // provides EntityID, InvalidEntityID, Scene2D
 
 #include <cstdint>
@@ -14,6 +15,8 @@ namespace HBE::Renderer {
 	class Renderer2D;
 	class ResourceCache;
 	class Mesh;
+	class GLShader;
+	class Texture2D;
 }
 
 namespace HBE::Renderer {
@@ -103,6 +106,14 @@ namespace HBE::Renderer {
 
 		mutable DebugDraw2D m_debugDraw{};
 		bool m_initialized = false;
+
+		// Resources for batched rendering. Populated in initialize() by looking up the
+		// sprite shader from ResourceCache and creating a 1x1 white texture.
+		Mesh*      m_quadMesh     = nullptr;
+		GLShader*  m_spriteShader = nullptr;
+		Texture2D* m_whiteTex     = nullptr;
+		mutable Material m_matAlpha{};    // sprite shader, white tex, alpha blend
+		mutable Material m_matAdditive{}; // sprite shader, white tex, additive blend
 
 		Effect* findEffect(ParticleHandle h);
 		const Effect* findEffect(ParticleHandle h) const;

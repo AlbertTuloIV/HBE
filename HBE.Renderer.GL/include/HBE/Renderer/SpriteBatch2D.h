@@ -1,72 +1,77 @@
+// HBE.Renderer.GL/include/HBE/Renderer/SpriteBatch2D.h
 #pragma once
+
+#include "HBE/Renderer/RenderPass.h"
 
 #include <vector>
 #include <cstdint>
 
 namespace HBE::Renderer {
 
-	class Material;
-	class Mesh;
-	struct RenderItem;
-	
-	// Batches "sprite-style" quads (pos+uv) into a few draw calls.
-	// Assumes the mesh submitted is the engine's standard unit quad
-	// centered at origin with UVs 0..1 ( current quad_pos_uv).
-	class SpriteBatch2D {
-	public:
-		SpriteBatch2D() = default;
-		~SpriteBatch2D();
+    class Material;
+    class Mesh;
+    class GLShader;
+    class Texture2D;
+    struct RenderItem;
 
-		SpriteBatch2D(const SpriteBatch2D&) = delete;
-		SpriteBatch2D& operator=(const SpriteBatch2D&) = delete;
+    class SpriteBatch2D {
+    public:
+        SpriteBatch2D() = default;
+        ~SpriteBatch2D();
 
-		void setQuadMesh(const Mesh* quadMesh) { m_quadMesh = quadMesh; }
-		void begin(); // reset per frame
-		void submit(const RenderItem& item);
-		void flush(const float* viewProj); // draws queued quads
+        SpriteBatch2D(const SpriteBatch2D&) = delete;
+        SpriteBatch2D& operator=(const SpriteBatch2D&) = delete;
 
-		// stats ( nice to haves, optional)
-		int drawCalls() const { return m_drawCalls; }
-		int quadCount() const { return m_quadsSubmitted; }
+        void setQuadMesh(const Mesh* quadMesh) { m_quadMesh = quadMesh; }
 
-	private:
-		struct Quad {
-			const Material* material = nullptr;
-			int layer = 0;
-			float sortKey = 0.0f;
-			uint32_t order = 0;
-			float v[6 * 5]; // 6 verts * (x, y, z, u, v)
-		};
+        void begin();
+        void submit(const RenderItem& item); // pass is read from item.pass
+        void flush(const float* viewProj);
 
-		uint32_t m_orderCounter = 0;
-		
-		static bool quadLess(const Quad& a, const Quad& b);
+        int drawCalls()      const { return m_drawCalls; }
+        int quadCount()      const { return m_quadsSubmitted; }
+        int stateChanges()   const { return m_stateChanges; } // NEW
 
-		const Mesh* m_quadMesh = nullptr;
+    private:
+        struct Quad {
+            std::uint64_t sortKey = 0;
+            std::uint32_t order = 0;
+            const Material* material = nullptr;
+            // 6 verts * (x, y, z, u, v, r, g, b, a) = 54 floats
+            float v[6 * 9];
+        };
 
-		bool m_glInited = false;
-		unsigned int m_vao = 0;
-		unsigned int m_vbo = 0;
+        static std::uint64_t buildSortKey(const RenderItem& item, const Material& mat);
+        static bool          quadLess(const Quad& a, const Quad& b);
 
-		// Cpu-side queue of quads (sorted before drawing)
-		std::vector<Quad> m_quads;
+        void initGL();
+        void destroyGL();
 
-		// CPU staging buffer for one flush group
-		std::vector<float> m_vertexStaging;
+        void emitQuadVertices(const RenderItem& item, float out54[54]) const;
 
-		// capacity control
-		int m_maxQuadsPerFlush = 5000; // tune-able
+        bool applyStateDiff(const Material* mat, const float* viewProj);
 
-		// stats
-		int m_drawCalls = 0;
-		int m_quadsSubmitted = 0;
+        void resetStateCache();
 
-		void initGL();
-		void destroyGL();
+        const Mesh* m_quadMesh = nullptr;
 
-		void emitQuadVertices(const RenderItem& item, float out30[30]) const;
+        bool         m_glInited = false;
+        unsigned int m_vao = 0;
+        unsigned int m_vbo = 0;
 
-		static bool materialLess(const Quad& a, const Quad& b);
-		void drawRange(const Material* mat, const float* viewProj, const float* verts, int vertexCount);
-	};
+        std::vector<Quad>  m_quads;
+        std::vector<float> m_vertexStaging;
+
+        int m_maxQuadsPerFlush = 5000;
+
+        const GLShader* m_lastShader = nullptr;
+        const Texture2D* m_lastTexture = nullptr;
+        const Material* m_lastMaterial = nullptr;
+        BlendMode        m_lastBlend = BlendMode::Invalid;
+
+        std::uint32_t m_orderCounter = 0;
+        int           m_drawCalls = 0;
+        int           m_quadsSubmitted = 0;
+        int           m_stateChanges = 0;
+    };
 }
