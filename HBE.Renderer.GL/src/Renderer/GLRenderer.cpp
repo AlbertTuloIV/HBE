@@ -5,6 +5,7 @@
 #include "HBE/Renderer/Camera2D.h"
 #include "HBE/Renderer/Mesh.h"
 #include "HBE/Renderer/Material.h"
+#include "HBE/Renderer/PostProcessStack.h"
 
 #include "HBE/Core/Log.h"
 #include "HBE/Core/Time.h"
@@ -95,6 +96,11 @@ namespace HBE::Renderer {
 
     void GLRenderer::endFrame(HBE::Platform::SDLPlatform& platform) {
         if (!m_initialized) return;
+
+        if (m_postProcess && m_postProcess->isInitialized()) {
+            m_postProcess->present(m_vpX, m_vpY, m_vpW, m_vpH);
+        }
+
         platform.swapBuffers();
     }
 
@@ -232,19 +238,22 @@ namespace HBE::Renderer {
         if (!m_initialized) return;
         if (vpW <= 0 || vpH <= 0) return;
 
-        glEnable(GL_SCISSOR_TEST);
-        glViewport(vpX, vpY, vpW, vpH);
-        glScissor(vpX, vpY, vpW, vpH);
+        m_vpX = vpX; m_vpY = vpY; m_vpW = vpW; m_vpH = vpH;
 
-        glClearColor(
-            m_clearColor[0],
-            m_clearColor[1],
-            m_clearColor[2],
-            m_clearColor[3]
-        );
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        glDisable(GL_SCISSOR_TEST);
+        if (m_postProcess && m_postProcess->isInitialized()) {
+            m_postProcess->bindSceneFBO();
+            glViewport(0, 0, m_postProcess->sceneFBO().width(), m_postProcess->sceneFBO().height());
+            glClearColor(m_clearColor[0], m_clearColor[1], m_clearColor[2], m_clearColor[3]);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
+        else {
+            glEnable(GL_SCISSOR_TEST);
+            glViewport(vpX, vpY, vpW, vpH);
+            glScissor(vpX, vpY, vpW, vpH);
+            glClearColor(m_clearColor[0], m_clearColor[1], m_clearColor[2], m_clearColor[3]);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glDisable(GL_SCISSOR_TEST);
+        }
     }
 
     void GLRenderer::getViewProjection(float out16[16]) const {

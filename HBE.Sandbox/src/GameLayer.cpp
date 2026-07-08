@@ -16,6 +16,7 @@
 #include "HBE/Renderer/Transform2D.h"
 #include "HBE/Renderer/UI/UIThemeLoader.h"
 #include "HBE/Renderer/TileMapLoader.h"
+#include "HBE/Renderer/PostProcessStack.h"
 
 #include "HBE/Renderer/SceneSerializer.h"
 #include "HBE/ECS/RuntimeComponents.h" // IDComponent, TagComponent
@@ -155,6 +156,86 @@ void GameLayer::onAttach(Application& app) {
     app.gl().setClearColor(0.1f, 0.2f, 0.35f, 1.0f);
 
     buildSpritePipeline();
+
+    // -- Shaders ------------------------------------
+    auto& ppResources = m_app->resources();
+    auto* bloomShader = ppResources.getOrCreateShaderFromFiles("pp_bloom",
+        "assets/shaders/pp_pass.vert", "assets/shaders/pp_bloom.frag");
+
+    auto* crtShader = ppResources.getOrCreateShaderFromFiles("pp_crt",
+        "assets/shaders/pp_pass.vert", "assets/shaders/pp_crt.frag");
+
+    auto* vigShader = ppResources.getOrCreateShaderFromFiles("pp_vignette",
+        "assets/shaders/pp_pass.vert", "assets/shaders/pp_vignette.frag");
+
+    auto* gradeShader = ppResources.getOrCreateShaderFromFiles("pp_colorgrade",
+        "assets/shaders/pp_pass.vert", "assets/shaders/pp_colorgrade.frag");
+
+    auto* pixelShader = ppResources.getOrCreateShaderFromFiles("pp_pixelate",
+        "assets/shaders/pp_pass.vert", "assets/shaders/pp_pixelate.frag");
+
+    if (m_postProcess.initialize(static_cast<int>(LOGICAL_WIDTH), static_cast<int>(LOGICAL_HEIGHT))) {
+        {
+            HBE::Renderer::PostProcessEffect fx{};
+            fx.name = "bloom";
+            fx.shader = bloomShader;
+            fx.enabled = false;         // off by default; toggle in dev UI
+            fx.params[0] = 0.7f;        // uThreshold
+            fx.params[1] = 1.2f;        // uIntensity
+            m_postProcess.addEffect(std::move(fx));
+        }
+        {
+            HBE::Renderer::PostProcessEffect fx{};
+            fx.name = "colorgrade";
+            fx.shader = gradeShader;
+            fx.enabled = false;
+            fx.params[0] = 0.0f;        // uBrightness
+            fx.params[1] = 1.0f;        // uContrast
+            fx.params[2] = 1.0f;        // uSaturation
+            m_postProcess.addEffect(std::move(fx));
+        }
+        {
+            HBE::Renderer::PostProcessEffect fx{};
+            fx.name = "vignette";
+            fx.shader = vigShader;
+            fx.enabled = true;          // on by default — subtle but always nice
+            fx.params[0] = 0.75f;       // uRadius
+            fx.params[1] = 0.45f;       // uSoftness
+            m_postProcess.addEffect(std::move(fx));
+        }
+        {
+            HBE::Renderer::PostProcessEffect fx{};
+            fx.name = "crt";
+            fx.shader = crtShader;
+            fx.enabled = false;
+            fx.params[0] = 0.3f;        // uScanlineStrength
+            fx.params[1] = 4.0f;        // uCurvature
+            m_postProcess.addEffect(std::move(fx));
+        }
+        {
+            HBE::Renderer::PostProcessEffect fx{};
+            fx.name = "pixelate";
+            fx.shader = pixelShader;
+            fx.enabled = false;
+            fx.params[0] = 4.0f;        // uPixelSize
+            m_postProcess.addEffect(std::move(fx));
+        }
+
+        // Cache effect pointers for the dev UI.
+        m_fxBloom = m_postProcess.getEffect("bloom");
+        m_fxColorGrade = m_postProcess.getEffect("colorgrade");
+        m_fxVignette = m_postProcess.getEffect("vignette");
+        m_fxCrt = m_postProcess.getEffect("crt");
+        m_fxPixelate = m_postProcess.getEffect("pixelate");
+
+        // Register with the renderer.
+        m_app->gl().setPostProcessStack(&m_postProcess);
+
+        LogInfo("Post-process stack initialized.");
+    }
+    else {
+        LogError("Post-process stack failed to initialize — running without effects.");
+    }
 
     // ── Particle System ────────────────────────────────────────────────────────
     m_particles.initialize(app.resources(), m_quadMesh);
@@ -1214,6 +1295,52 @@ void GameLayer::onRender() {
         m_ui.setStyle(saved);
 
         m_ui.endPanel();
+
+        // ── Post-Processing panel ──────────────────────────────────────────
+        UIRect ppRect{ 20.0f, LOGICAL_HEIGHT - 440.0f, 340.0f, 390.0f };
+        if (m_ui.beginPanel("pp_panel", ppRect, "Post FX")) {
+
+            auto checkbox = [&](const char* id, const char* label, HBE::Renderer::PostProcessEffect* fx) {
+                if (!fx) return;
+                m_ui.checkbox(id, label, fx->enabled);
+            };
+
+            auto slider = [&](const char* id, const char* label, float& val, float lo, float hi) {
+                m_ui.sliderFloat(id, label, val, lo, hi);
+            };
+
+            checkbox("fx_bloom",      "Bloom",       m_fxBloom);
+            if (m_fxBloom && m_fxBloom->enabled) {
+                slider("fx_bloom_thresh", "  Threshold", m_fxBloom->params[0], 0.0f, 1.0f);
+                slider("fx_bloom_int",    "  Intensity",  m_fxBloom->params[1], 0.0f, 3.0f);
+            }
+
+            checkbox("fx_grade",      "Color Grade",  m_fxColorGrade);
+            if (m_fxColorGrade && m_fxColorGrade->enabled) {
+                slider("fx_grade_br",  "  Brightness", m_fxColorGrade->params[0], -0.5f, 0.5f);
+                slider("fx_grade_con", "  Contrast",   m_fxColorGrade->params[1],  0.0f, 3.0f);
+                slider("fx_grade_sat", "  Saturation", m_fxColorGrade->params[2],  0.0f, 2.0f);
+            }
+
+            checkbox("fx_vig",        "Vignette",     m_fxVignette);
+            if (m_fxVignette && m_fxVignette->enabled) {
+                slider("fx_vig_rad",  "  Radius",   m_fxVignette->params[0], 0.3f, 1.2f);
+                slider("fx_vig_soft", "  Softness", m_fxVignette->params[1], 0.0f, 1.0f);
+            }
+
+            checkbox("fx_crt",        "CRT",          m_fxCrt);
+            if (m_fxCrt && m_fxCrt->enabled) {
+                slider("fx_crt_scan", "  Scanlines", m_fxCrt->params[0], 0.0f,  1.0f);
+                slider("fx_crt_curv", "  Curvature", m_fxCrt->params[1], 1.0f, 12.0f);
+            }
+
+            checkbox("fx_pixel",      "Pixelate",     m_fxPixelate);
+            if (m_fxPixelate && m_fxPixelate->enabled) {
+                slider("fx_pixel_sz", "  Pixel Size", m_fxPixelate->params[0], 1.0f, 16.0f);
+            }
+
+            m_ui.endPanel();
+        }
     }
     if (m_showFpsGraph) {
         auto savedStyle = m_ui.style();
@@ -1419,6 +1546,9 @@ bool GameLayer::onEvent(HBE::Core::Event& e) {
     }
 
     if (e.type() == EventType::WindowResize) {
+        if (m_postProcess.isInitialized()) {
+            m_postProcess.resize(static_cast<int>(LOGICAL_WIDTH), static_cast<int>(LOGICAL_HEIGHT));
+        }
         return false;
     }
 
