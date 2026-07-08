@@ -119,6 +119,29 @@ The sandbox project demonstrates how to build a game using the engine.
 
 The sandbox scene should load automatically.
 
+### Development launch
+
+The sandbox locates its `assets/` folder automatically by searching
+outward from the executable and the current working directory
+(see `HBE::Core::AssetPaths`). The Debug/Release post-build step also
+mirrors `HBE.Sandbox/assets/` into `x64/<Config>/assets/` so the exe
+is portable — you can double-click `x64/Debug/HBE.Sandbox.exe` from
+Explorer or zip up `x64/Release/` and drop it anywhere.
+
+To override the asset root for tooling or testing, set an env var
+before launch:
+
+    setx HBE_ASSET_ROOT "G:\Dev\HBE\HBE.Sandbox\assets"
+
+or, per-shell:
+
+    $env:HBE_ASSET_ROOT = "G:\Dev\HBE\HBE.Sandbox\assets"
+
+Writable user data (bindings, saves) always lives under
+`%APPDATA%\HBE\HonestlyBadEngine\`, not the asset root. To relocate it,
+pass `AssetPaths::Config::forceUserDataRoot` when calling
+`Application::initialize`.
+
 ------------------------------------------------------------------------
 
 ## 🎮 Current Gameplay Demo

@@ -20,13 +20,19 @@ namespace HBE::Core {
 		// SDLPlatform destructur already calls shutdown()
 	}
 
-	bool Application::initialize(const HBE::Platform::WindowConfig& windowCfg) {
+	bool Application::initialize(const HBE::Platform::WindowConfig& windowCfg, const HBE::Core::AssetPaths::Config& assetCfg) {
 		if (m_initialized) return true;
 
 		m_windowCfg = windowCfg;
 
 		if (!m_platform.initialize(windowCfg)) {
 			LogError("Application: SDLPlatform init failed.");
+			return false;
+		}
+		if (!HBE::Core::AssetPaths::Initialize(assetCfg)) {
+			LogError("Application: AssetPaths init failed. "
+				"Game will not be able to load assets.");
+			m_platform.shutdown();
 			return false;
 		}
 

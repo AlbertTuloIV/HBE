@@ -27,3 +27,10 @@ settings.VisualStudio.json
 /Chatgpt
 *.zip
 /.hbe_ai
+
+# User data — never commit (lives in %APPDATA%\HBE\HonestlyBadEngine\)
+bindings.cfg
+bindings.json
+HBE.Sandbox/bindings.cfg
+HBE.Sandbox/bindings.json
+x64/**/bindings.cfg
