@@ -115,6 +115,6 @@
       "uuid": "1d0a8369fba1257772989e5562fafc7b"
     }
   ],
-  "tilemap": "assets/maps/test_map.json",
+  "tilemap": "maps/test_map.json",
   "version": 1
 }

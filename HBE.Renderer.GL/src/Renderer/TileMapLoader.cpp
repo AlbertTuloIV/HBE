@@ -1,5 +1,6 @@
 #include "HBE/Renderer/TileMapLoader.h"
 #include "HBE/Core/Log.h"
+#include "HBE/Core/AssetPaths.h"
 
 #include <fstream>
 #include <sstream>
@@ -58,7 +59,14 @@ namespace HBE::Renderer {
         for (auto& ts : j["tilesets"]) {
             TileMapTileset t{};
             t.name = ts.value("name", "");
-            t.texturePath = ts.value("texture", "");
+            // texturePath is stored in JSON as either:
+            //   - "../tiles/tiles.png"     (sibling-relative to this map file)
+            //   - "/tiles/tiles.png"       (logical, from asset root)
+            //   - "assets/tiles/tiles.png" (legacy; supported during migration)
+            // Resolve to an absolute path once here so downstream loaders
+            // (stbi_load, Texture2D::loadFromFile) receive something concrete.
+            t.texturePath = HBE::Core::AssetPaths::ResolveRelativeTo(
+                path, ts.value("texture", ""));
             t.tileW = ts.value("tileW", map.tileSizeW);
             t.tileH = ts.value("tileH", map.tileSizeH);
             t.margin = ts.value("margin", 0);
@@ -183,6 +191,9 @@ namespace HBE::Renderer {
         stbi_set_flip_vertically_on_load(0);
 
         int w = 0, h = 0, ch = 0;
+        // NOTE: ts.texturePath was resolved to an absolute path in
+        // loadFromJsonFile via AssetPaths::ResolveRelativeTo. Do NOT prepend
+        // anything else here.
         unsigned char* data = stbi_load(ts.texturePath.c_str(), &w, &h, &ch, 4);
         if (!data) return false;
 

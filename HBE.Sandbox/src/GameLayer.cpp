@@ -4,6 +4,7 @@
 #include "HBE/Core/Application.h"
 #include "HBE/Core/Log.h"
 #include "HBE/Core/Event.h"
+#include "HBE/Core/AssetPaths.h"
 
 #include "HBE/Platform/Input.h"
 #include "HBE/Input/InputMap.h"
@@ -29,6 +30,7 @@
 #include <vector>
 #include <string>
 #include <filesystem>
+#include <system_error>
 
 #include <algorithm> // remove_if
 #include <utility>   // move
@@ -51,10 +53,21 @@ namespace {
     constexpr float GOBLIN_BODY_Y_OFFSET_PX = +0.5f;
 
     // Where user overrides live (next to exe while developing)
-    constexpr const char* BINDINGS_FILE = "bindings.cfg";
+    constexpr const char* BINDINGS_LOGICAL = "bindings.cfg";
 
     // Scene serialization file (relative to HBE.Sandbox CWD)
-    constexpr const char* SCENE_PATH = "assets/scenes/sandbox.scene.json";
+    constexpr const char* SCENE_LOGICAL = "scenes/sandbox.scene.json";
+
+    // Editor vs. shipping split for F5 scene save.
+    //  - Debug: overwrite the tracked scene file so committed data stays fresh.
+    //  - Release: never write into the asset root (Program Files may be
+    //    read-only); redirect saves to <userDataRoot>/scenes/... instead.
+    //  Item 28 (Real Editor Mode) turns this into a runtime toggle.
+#if defined(_DEBUG)
+    constexpr bool kSceneSaveGoesToUserData = false;
+#else
+    constexpr bool kSceneSaveGoesToUserData = true;
+#endif
 
     static float Approach(float v, float target, float maxDelta) {
         if (v < target) return std::min(v + maxDelta, target);
@@ -128,10 +141,10 @@ void GameLayer::onAttach(Application& app) {
     m_app = &app;
     m_console.setWindow(app.platform().getWindow());
     // Ensure paths are initialized (prevents empty-string watches if header defaults differ)
-    if (m_tileMapPath.empty())  m_tileMapPath = "assets/maps/test_map.json";
-    if (m_uiThemePath.empty())  m_uiThemePath = "assets/ui/theme.json";
-    if (m_spriteVsPath.empty()) m_spriteVsPath = "assets/shaders/sprite.vert";
-    if (m_spriteFsPath.empty()) m_spriteFsPath = "assets/shaders/sprite.frag";
+    if (m_tileMapPath.empty())  m_tileMapPath = "maps/test_map.json";
+    if (m_uiThemePath.empty())  m_uiThemePath = "ui/theme.json";
+    if (m_spriteVsPath.empty()) m_spriteVsPath = "shaders/sprite.vert";
+    if (m_spriteFsPath.empty()) m_spriteFsPath = "shaders/sprite.frag";
 
     // ------------------------------------------------------------
     // Input Mapping Layer:
@@ -139,7 +152,7 @@ void GameLayer::onAttach(Application& app) {
     // - Player overrides loaded from bindings.cfg
     // ------------------------------------------------------------
     HBE::Input::Initialize(&RegisterDefaultBindings);
-    HBE::Input::Get().loadFromFile(BINDINGS_FILE); // safe if missing (returns false)
+    HBE::Input::Get().loadFromFile(HBE::Core::AssetPaths::ResolveUser(BINDINGS_LOGICAL)); // safe if missing (returns false)
 
     HBE::Core::LogInfo(std::string("CWD: ") + std::filesystem::current_path().string());
 
@@ -159,20 +172,23 @@ void GameLayer::onAttach(Application& app) {
 
     // -- Shaders ------------------------------------
     auto& ppResources = m_app->resources();
+    namespace ap = HBE::Core::AssetPaths;
+    const std::string ppVs = ap::Resolve("shaders/pp_pass.vert");
+
     auto* bloomShader = ppResources.getOrCreateShaderFromFiles("pp_bloom",
-        "assets/shaders/pp_pass.vert", "assets/shaders/pp_bloom.frag");
+        ppVs, ap::Resolve("shaders/pp_bloom.frag"));
 
     auto* crtShader = ppResources.getOrCreateShaderFromFiles("pp_crt",
-        "assets/shaders/pp_pass.vert", "assets/shaders/pp_crt.frag");
+        ppVs, ap::Resolve("shaders/pp_crt.frag"));
 
     auto* vigShader = ppResources.getOrCreateShaderFromFiles("pp_vignette",
-        "assets/shaders/pp_pass.vert", "assets/shaders/pp_vignette.frag");
+        ppVs, ap::Resolve("shaders/pp_vignette.frag"));
 
     auto* gradeShader = ppResources.getOrCreateShaderFromFiles("pp_colorgrade",
-        "assets/shaders/pp_pass.vert", "assets/shaders/pp_colorgrade.frag");
+        ppVs, ap::Resolve("shaders/pp_colorgrade.frag"));
 
     auto* pixelShader = ppResources.getOrCreateShaderFromFiles("pp_pixelate",
-        "assets/shaders/pp_pass.vert", "assets/shaders/pp_pixelate.frag");
+        ppVs, ap::Resolve("shaders/pp_pixelate.frag"));
 
     if (m_postProcess.initialize(static_cast<int>(LOGICAL_WIDTH), static_cast<int>(LOGICAL_HEIGHT))) {
         {
@@ -257,7 +273,9 @@ void GameLayer::onAttach(Application& app) {
 
     // load Tilemap
     std::string err;
-    if (!HBE::Renderer::TileMapLoader::loadFromJsonFile(m_tileMapPath, m_tileMap, &err)) {
+    if (!HBE::Renderer::TileMapLoader::loadFromJsonFile(
+        ap::Resolve(m_tileMapPath), m_tileMap, &err))
+    {
         LogFatal("Failed to load tilemap: " + err);
         m_app->requestQuit();
         return;
@@ -285,9 +303,10 @@ void GameLayer::onAttach(Application& app) {
     app.audio().setBusGain(HBE::Platform::Audio::Bus::UI, 0.90f);
     app.audio().setBusGain(HBE::Platform::Audio::Bus::Ambient, 0.80f);
 
-    app.audio().loadSound("footstep", "assets/audio/test_sound.wav", true);
-    app.audio().loadSound("hit", "assets/audio/test_sound.wav", true);
-    app.audio().loadSound("ui_blip", "assets/audio/test_sound.wav", true);
+    const std::string testSoundPath = ap::Resolve("audio/test_sound.wav");
+    app.audio().loadSound("footstep", testSoundPath, true);
+    app.audio().loadSound("hit", testSoundPath, true);
+    app.audio().loadSound("ui_blip", testSoundPath, true);
 
     // When you add a real music file later, swap the path below.
     // Example:
@@ -561,7 +580,10 @@ void GameLayer::onAttach(Application& app) {
 void GameLayer::buildSpritePipeline() {
     auto& resources = m_app->resources();
 
-    m_spriteShader = resources.getOrCreateShaderFromFiles("sprite", m_spriteVsPath, m_spriteFsPath);
+    m_spriteShader = resources.getOrCreateShaderFromFiles(
+        "sprite",
+        HBE::Core::AssetPaths::Resolve(m_spriteVsPath),
+        HBE::Core::AssetPaths::Resolve(m_spriteFsPath));
 
     // Fallback (only if files missing)
     if (!m_spriteShader) {
@@ -658,14 +680,15 @@ void main() {
     }
 
     // Font
+    const std::string fontPath = HBE::Core::AssetPaths::Resolve("fonts/BoldPixels.ttf");
     if (!m_text.loadSDFont(m_app->resources(),
         "ui",
-        "assets/fonts/BoldPixels.ttf",
+        fontPath,
         16.0f,
         1024, 1024,
         12))
     {
-        LogError("FAILED to load font: assets/fonts/BoldPixels.ttf");
+        LogError("FAILED to load font: " + fontPath);
     }
     else {
         m_text.setActiveFont("ui");
@@ -676,16 +699,16 @@ void main() {
     desc.frameWidth = 100;
     desc.frameHeight = 100;
 
-    m_goblinSheet = SpriteRenderer2D::declareSpriteSheet(resources, "orc_sheet", "assets/Orc.png", desc);
-    m_soldierSheet = SpriteRenderer2D::declareSpriteSheet(resources, "soldier_sheet", "assets/Soldier.png", desc);
+    m_goblinSheet = SpriteRenderer2D::declareSpriteSheet(resources, "orc_sheet", HBE::Core::AssetPaths::Resolve("Orc.png"), desc);
+    m_soldierSheet = SpriteRenderer2D::declareSpriteSheet(resources, "soldier_sheet", HBE::Core::AssetPaths::Resolve("Soldier.png"), desc);
 
     if (!m_goblinSheet.texture) {
-        LogFatal("GameLayer: failed to load assets/Orc.png");
+        LogFatal("GameLayer: failed to load Orc.png (asset root: " + HBE::Core::AssetPaths::AssetRootString() + ")");
         m_app->requestQuit();
         return;
     }
     if (!m_soldierSheet.texture) {
-        LogFatal("GameLayer: failed to load assets/Soldier.png");
+        LogFatal("GameLayer: failed to load Soldier.png (asset root: " + HBE::Core::AssetPaths::AssetRootString() + ")");
         m_app->requestQuit();
         return;
     }
@@ -851,11 +874,31 @@ void GameLayer::onUpdate(float dt) {
             return "";
             };
 
-        const bool ok = HBE::Renderer::SceneSerializer::saveToFile(
-            m_scene, SCENE_PATH, saveCb, m_tileMapPath, &err);
+        namespace ap = HBE::Core::AssetPaths;
+        // Debug builds overwrite the tracked scene file; shipping builds
+        // must not touch the (potentially read-only) asset root.
+        const std::string scenePath = kSceneSaveGoesToUserData
+            ? ap::ResolveUser(SCENE_LOGICAL)
+            : ap::Resolve(SCENE_LOGICAL);
 
-        if (ok) LogInfo(std::string("Scene saved: ") + SCENE_PATH);
-        else    LogError("Scene save FAILED: " + err);
+        // Make sure the parent directory exists for user-data saves — the
+        // first time you press F5 in a shipping build, <userDataRoot>/scenes/
+        // does not exist yet.
+        if (kSceneSaveGoesToUserData) {
+            std::error_code ec;
+            std::filesystem::create_directories(
+                std::filesystem::path(scenePath).parent_path(), ec);
+        }
+
+        const bool ok = HBE::Renderer::SceneSerializer::saveToFile(
+            m_scene, scenePath, saveCb, m_tileMapPath, &err);
+
+        if (!ok) {
+            LogError("Scene save FAILED: " + err);
+        }
+        else {
+            LogInfo("Scene saved: " + scenePath);
+        }
     }
 
     if (KeyPressed(SDL_SCANCODE_F9)) {
@@ -996,18 +1039,29 @@ void GameLayer::onUpdate(float dt) {
                 }
             };
 
+        namespace ap = HBE::Core::AssetPaths;
+        // Prefer the user-data override (from a prior F5 in shipping mode);
+        // fall back to the tracked asset-root scene otherwise.
+        std::string scenePath = ap::ResolveUser(SCENE_LOGICAL);
+        {
+            std::error_code ec;
+            if (!std::filesystem::exists(scenePath, ec)) {
+                scenePath = ap::Resolve(SCENE_LOGICAL);
+            }
+        }
+
         const bool ok = HBE::Renderer::SceneSerializer::loadFromFile(
-            m_scene, SCENE_PATH, loadCb, &tilemapPath, &err);
+            m_scene, scenePath, loadCb, &tilemapPath, &err);
 
         if (!ok) {
             LogError("Scene load FAILED: " + err);
         }
         else {
-            LogInfo(std::string("Scene loaded: ") + SCENE_PATH);
+            LogInfo("Scene loaded: " + scenePath);
 
             // Re-hook tilemap if scene file requested a different one
             if (!tilemapPath.empty()) {
-                m_tileMapPath = tilemapPath;
+                m_tileMapPath = ap::StripLegacyAssetsPrefix(tilemapPath);
             }
 
             // Rebuild tilemap (and collision context) using your existing hot-reload path
@@ -1617,20 +1671,20 @@ void GameLayer::setupHotReloadWatches() {
     opt.debounceSeconds = 0.25f;
     m_watcher.setOptions(opt);
 
-    // Shader hot reload
-    m_watcher.watchFile(m_spriteVsPath, [this](const std::string&) { hotReloadShader(); });
-    m_watcher.watchFile(m_spriteFsPath, [this](const std::string&) { hotReloadShader(); });
+    m_watcher.watchFile(AssetPaths::Resolve(m_spriteVsPath), [this](const std::string&) { hotReloadShader(); });
+    m_watcher.watchFile(AssetPaths::Resolve(m_spriteFsPath), [this](const std::string&) { hotReloadShader(); });
+    m_watcher.watchFile(AssetPaths::Resolve(m_tileMapPath), [this](const std::string&) { hotReloadTileMap(); });
+    m_watcher.watchFile(AssetPaths::Resolve(m_uiThemePath), [this](const std::string&) { hotReloadUITheme(); });
 
-    // Tilemap hot reload
-    m_watcher.watchFile(m_tileMapPath, [this](const std::string&) { hotReloadTileMap(); });
+    auto watchTex = [this](const std::string& logicalPath, const std::string& cacheKey, const std::string& popupLabel) {
+        m_watcher.watchFile(AssetPaths::Resolve(logicalPath), [this, cacheKey, popupLabel](const std::string&) {
+            m_app->resources().reloadTexture(cacheKey); spawnPopup(20.0f, 590.0f, "Texture reloaded: " + popupLabel, HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f }, 1.0f, 0.0f);
+            });
+        };
 
-    // UI theme hot reload
-    m_watcher.watchFile(m_uiThemePath, [this](const std::string&) { hotReloadUITheme(); });
-
-    // Texture hot reload (these names match your SpriteRenderer2D declare calls)
-    m_watcher.watchFile("assets/Orc.png", [this](const std::string& p) { hotReloadTextureByPath(p); });
-    m_watcher.watchFile("assets/Soldier.png", [this](const std::string& p) { hotReloadTextureByPath(p); });
-    m_watcher.watchFile("assets/tiles/tiles.png", [this](const std::string& p) { hotReloadTextureByPath(p); });
+    watchTex("Orc.png", "orc_sheet", "Orc.png");
+    watchTex("Soldier.png", "soldier_sheet", "Soldier.png");
+    watchTex("tiles/tiles.png", "basic", "tiles.png");
 }
 
 void GameLayer::hotReloadShader() {
@@ -1648,10 +1702,14 @@ void GameLayer::hotReloadTileMap() {
     // Load New Map    
     HBE::Renderer::TileMap newMap{};
     std::string err;
-    auto newMapBool = TileMapLoader::loadFromJsonFile(m_tileMapPath, newMap, &err);
+    namespace ap = HBE::Core::AssetPaths;
+    const std::string tmPath = ap::Resolve(m_tileMapPath);
+    auto newMapBool = TileMapLoader::loadFromJsonFile(tmPath, newMap, &err);
+
     if (!newMapBool) {
-        LogError("TileMap hot-reload: failed to load " + m_tileMapPath);
-        spawnPopup(20.0f, 650.0f, "Tilemap reload FAILED: failed to load " + m_tileMapPath, HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f,0.0f);
+        LogError("TileMap hot-reload: failed to load " + tmPath + " (" + err + ")");
+        spawnPopup(20.0f, 650.0f, "Tilemap reload FAILED: " + err,
+            HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
         return;
     }
 
@@ -1689,7 +1747,8 @@ void GameLayer::hotReloadUITheme() {
     HBE::Renderer::UI::UIStyle s = m_ui.style();
     std::string err;
 
-    bool ok = HBE::Renderer::UI::UIThemeLoader::loadStyleFromJsonFile(m_uiThemePath, s, &err);
+    bool ok = HBE::Renderer::UI::UIThemeLoader::loadStyleFromJsonFile(
+        HBE::Core::AssetPaths::Resolve(m_uiThemePath), s, &err);
     if (!ok) {
         spawnPopup(20.0f, 620.0f, "UI theme reload FAILED: " + err,
             HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
@@ -1700,29 +1759,6 @@ void GameLayer::hotReloadUITheme() {
 
     spawnPopup(20.0f, 620.0f, "UI theme reloaded",
         HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f }, 1.25f, 0.0f);
-}
-
-void GameLayer::hotReloadTextureByPath(const std::string& path) {
-    if (!m_app) return;
-
-    // Map file path -> cache name you used when loading
-    if (path == "assets/Orc.png") {
-        m_app->resources().reloadTexture("orc_sheet");
-        spawnPopup(20.0f, 590.0f, "Texture reloaded: Orc.png",
-            HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f }, 1.0f, 0.0f);
-    }
-    else if (path == "assets/Soldier.png") {
-        m_app->resources().reloadTexture("soldier_sheet");
-        spawnPopup(20.0f, 590.0f, "Texture reloaded: Soldier.png",
-            HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f }, 1.0f, 0.0f);
-    }
-    else if (path == "assets/tiles/tiles.png") {
-        // If your TileMapRenderer uses a different cache key, adjust this:
-        m_app->resources().reloadTexture("basic");
-
-        spawnPopup(20.0f, 590.0f, "Texture reloaded: tiles.png",
-            HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f }, 1.0f, 0.0f);
-    }
 }
 
 void GameLayer::onDetach() {

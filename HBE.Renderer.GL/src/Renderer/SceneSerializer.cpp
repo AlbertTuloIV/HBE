@@ -2,6 +2,7 @@
 
 #include "HBE/Core/Log.h"
 #include "HBE/Core/UUID.h"
+#include "HBE/Core/AssetPaths.h"
 
 #include "HBE/ECS/RuntimeComponents.h"
 #include "HBE/ECS/Components.h"
@@ -183,7 +184,14 @@ namespace HBE::Renderer {
 
         json root;
         root["version"] = 1;
-        root["tilemap"] = tilemapPath;
+        // Store the tilemap reference as a LOGICAL path so scene files remain
+        // portable across machines and don't embed developer-specific
+        // absolute paths. GameLayer already hands us a logical path since
+        // step 3 of item 13; strip is a no-op on a clean path and defensive
+        // against accidental absolute inputs.
+        // TODO(item 13 cleanup): once no scenes on disk carry an "assets/"
+        // prefix, StripLegacyAssetsPrefix can be removed in item 14.
+        root["tilemap"] = HBE::Core::AssetPaths::StripLegacyAssetsPrefix(tilemapPath);
 
         json ents = json::array();
 
@@ -294,7 +302,17 @@ namespace HBE::Renderer {
         (void)version;
 
         if (outTilemapPath) {
-            *outTilemapPath = root.value("tilemap", "");
+            // Normalize to a LOGICAL path (no leading "assets/", no absolute
+            // prefix). GameLayer stores m_tileMapPath as a logical path and
+            // re-resolves at every use site; storing an absolute path here
+            // would break the moment the game is moved to a different asset
+            // root.
+            // TODO(item 13 cleanup): drop StripLegacyAssetsPrefix in item 14
+            // once no scenes on disk carry an "assets/" prefix.
+            const std::string embedded = root.value("tilemap", "");
+            *outTilemapPath = embedded.empty()
+                ? std::string{}
+                : HBE::Core::AssetPaths::StripLegacyAssetsPrefix(embedded);
         }
 
         if (!root.contains("entities") || !root["entities"].is_array()) {

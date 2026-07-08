@@ -61,10 +61,10 @@ private:
 	HBE::Core::FileWatcher m_watcher{};
 
 	// Hot reload targets (relative to working directory)
-	std::string m_tileMapPath = "assets/maps/test_map.json";
-	std::string m_uiThemePath = "assets/ui/theme.json";
-	std::string m_spriteVsPath = "assets/shaders/sprite.vert";
-	std::string m_spriteFsPath = "assets/shaders/sprite.frag";
+	std::string m_tileMapPath = "maps/test_map.json";
+	std::string m_uiThemePath = "ui/theme.json";
+	std::string m_spriteVsPath = "shaders/sprite.vert";
+	std::string m_spriteFsPath = "shaders/sprite.frag";
 
 	struct DebugPopup {
 		std::string text;
@@ -148,5 +148,4 @@ private:
 	void hotReloadShader();
 	void hotReloadTileMap();
 	void hotReloadUITheme();
-	void hotReloadTextureByPath(const std::string& path);
 };

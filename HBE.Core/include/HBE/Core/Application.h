@@ -1,6 +1,7 @@
 #pragma once
 
 #include "HBE/Core/LayerStack.h"
+#include "HBE/Core/AssetPaths.h"
 
 #include "HBE/Platform/SDLPlatform.h"
 #include "HBE/Platform/Audio.h"
@@ -23,7 +24,7 @@ namespace HBE::Core {
 			float y = 0.f;
 		};
 
-		bool initialize(const HBE::Platform::WindowConfig& windowCfg);
+		bool initialize(const HBE::Platform::WindowConfig& windowCfg, const HBE::Core::AssetPaths::Config& assetCfg = {});
 
 		// screen pixels -> logical coords (0..logicalW, 0..logicalH)
 		// returns false if the screen point is in the black bars
@@ -47,6 +48,9 @@ namespace HBE::Core {
 		HBE::Renderer::GLRenderer& gl() { return m_gl; }
 		HBE::Renderer::Renderer2D& renderer2D() { return m_renderer2D; }
 		HBE::Renderer::ResourceCache& resources() { return m_resources; }
+
+		const std::filesystem::path& assetRoot() const { return HBE::Core::AssetPaths::AssetRoot(); }
+		const std::filesystem::path& userDataRoot() const { return HBE::Core::AssetPaths::UserDataRoot(); }
 
 		int windowWidthPixels() const { return m_winW; }
 		int windowHeightPixels() const { return m_winH; }

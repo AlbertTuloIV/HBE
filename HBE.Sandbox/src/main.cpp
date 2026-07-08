@@ -17,8 +17,12 @@ int main() {
 	cfg.mode = WindowMode::Windowed;
 	cfg.vsync = true;
 
+	HBE::Core::AssetPaths::Config assetCfg{};
+	assetCfg.organization = "HBE";
+	assetCfg.application = "HonestlyBadEngine";
+
 	Application app;
-	if (!app.initialize(cfg)) {
+	if (!app.initialize(cfg, assetCfg)) {
 		LogFatal("SandBox: app.initialize failed.");
 		return -1;
 	}
