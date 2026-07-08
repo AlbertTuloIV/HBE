@@ -17,6 +17,7 @@
 #include "HBE/Renderer/TextRenderer2D.h"
 #include "HBE/Renderer/UI/UIContext.h"
 #include "HBE/Renderer/ParticleSystem.h"
+#include "HBE/Renderer/PostProcessStack.h"
 
 #include <array>
 #include <unordered_map>
@@ -105,6 +106,13 @@ private:
 	HBE::Renderer::EntityID m_soldierEntity = HBE::Renderer::InvalidEntityID;
 
 	HBE::Renderer::ParticleHandle m_rainHandle = HBE::Renderer::kInvalidParticle;
+
+	HBE::Renderer::PostProcessStack m_postProcess;
+	HBE::Renderer::PostProcessEffect* m_fxBloom = nullptr;
+	HBE::Renderer::PostProcessEffect* m_fxColorGrade = nullptr;
+	HBE::Renderer::PostProcessEffect* m_fxVignette = nullptr;
+	HBE::Renderer::PostProcessEffect* m_fxCrt = nullptr;
+	HBE::Renderer::PostProcessEffect* m_fxPixelate = nullptr;
 
 	// Set to true after the first onUpdate pre-warms the rain emitter (see onUpdate).
 	bool m_rainPreWarmed = false;

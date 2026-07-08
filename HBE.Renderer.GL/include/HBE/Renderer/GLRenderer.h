@@ -9,6 +9,7 @@ namespace HBE::Platform {
 namespace HBE::Renderer {
 
     class GLShader;
+    class PostProcessStack;
     struct Transform2D;
     struct RenderItem;
     struct Camera2D;
@@ -50,10 +51,17 @@ namespace HBE::Renderer {
         // build the camera view-projection matric (proj * view)
         void getViewProjection(float out16[16]) const;
 
+        // Register a post-process stack. Pass nullptr to disable.
+        void setPostProcessStack(PostProcessStack* stack) { m_postProcess = stack; }
+
 
     private:
         bool m_initialized = false;
         std::array<float, 4> m_clearColor{ 0.1f, 0.2f, 0.35f, 1.0f };
+
+        int m_vpX = 0, m_vpY = 0, m_vpW = 0, m_vpH = 0;
+
+        PostProcessStack* m_postProcess = nullptr;
 
         // Non-owning pointer to the current camera (owned by sandbox / game).
         Camera2D* m_camera = nullptr;
