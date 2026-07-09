@@ -20,7 +20,7 @@
 #include "HBE/Renderer/PostProcessStack.h"
 
 #include "HBE/Renderer/SceneSerializer.h"
-#include "HBE/ECS/RuntimeComponents.h" // IDComponent, TagComponent
+#include "HBE/ECS/RuntimeComponents.h"
 #include "HBE/ECS/Components.h"
 
 #include <SDL3/SDL_scancode.h>
@@ -32,8 +32,8 @@
 #include <filesystem>
 #include <system_error>
 
-#include <algorithm> // remove_if
-#include <utility>   // move
+#include <algorithm>
+#include <utility>
 
 using namespace HBE::Core;
 using namespace HBE::Renderer;
@@ -41,9 +41,6 @@ using namespace HBE::Platform;
 
 namespace {
     constexpr float SPRITE_PIXEL_SCALE = 4.0f;
-
-    // --- COLLIDER SIZE IN PIXELS (tweak these) ---
-    // These are NOT frame sizes, they are "body" sizes.
     constexpr float PLAYER_BODY_W_PX = 8.0f;
     constexpr float PLAYER_BODY_H_PX = 14.0f;
     constexpr float PLAYER_BODY_Y_OFFSET_PX = +0.5f;
@@ -52,17 +49,15 @@ namespace {
     constexpr float GOBLIN_BODY_H_PX = 14.0f;
     constexpr float GOBLIN_BODY_Y_OFFSET_PX = +0.5f;
 
-    // Where user overrides live (next to exe while developing)
     constexpr const char* BINDINGS_LOGICAL = "bindings.cfg";
-
-    // Scene serialization file (relative to HBE.Sandbox CWD)
     constexpr const char* SCENE_LOGICAL = "scenes/sandbox.scene.json";
 
-    // Editor vs. shipping split for F5 scene save.
-    //  - Debug: overwrite the tracked scene file so committed data stays fresh.
-    //  - Release: never write into the asset root (Program Files may be
-    //    read-only); redirect saves to <userDataRoot>/scenes/... instead.
-    //  Item 28 (Real Editor Mode) turns this into a runtime toggle.
+    static void SetAnimatorPreset(HBE::ECS::Registry& reg, HBE::ECS::Entity e, const std::string& presetName) {
+        HBE::ECS::AnimatorPresetComponent ap{};
+        ap.preset = presetName;
+        reg.emplace<HBE::ECS::AnimatorPresetComponent>(e, ap);
+    }
+
 #if defined(_DEBUG)
     constexpr bool kSceneSaveGoesToUserData = false;
 #else
@@ -75,32 +70,23 @@ namespace {
         return target;
     }
 
-    // Game-owned default bindings (engine stays universal).
     static void RegisterDefaultBindings(HBE::Input::InputMap& map)
     {
         using namespace HBE::Input;
 
-        // --- Actions ---
         map.bindAction(Action::Jump, Binding::Key(SDL_SCANCODE_SPACE), true);
         map.bindAction(Action::Jump, Binding::GamepadButton(SDL_GAMEPAD_BUTTON_SOUTH), false);
-
-        // Attack default: E on keyboard, X/Square on controller
         map.bindAction(Action::Attack, Binding::Key(SDL_SCANCODE_E), true);
         map.bindAction(Action::Attack, Binding::GamepadButton(SDL_GAMEPAD_BUTTON_WEST), false);
-
         map.bindAction(Action::UIConfirm, Binding::Key(SDL_SCANCODE_RETURN), true);
         map.bindAction(Action::UIConfirm, Binding::GamepadButton(SDL_GAMEPAD_BUTTON_SOUTH), false);
-
         map.bindAction(Action::UICancel, Binding::Key(SDL_SCANCODE_ESCAPE), true);
         map.bindAction(Action::UICancel, Binding::GamepadButton(SDL_GAMEPAD_BUTTON_EAST), false);
-
         map.bindAction(Action::Pause, Binding::Key(SDL_SCANCODE_ESCAPE), true);
         map.bindAction(Action::Pause, Binding::GamepadButton(SDL_GAMEPAD_BUTTON_START), false);
-
         map.bindAction(Action::FullscreenToggle, Binding::Key(SDL_SCANCODE_F11), true);
         map.bindAction(Action::FullscreenToggle, Binding::None(), false);
 
-        // --- Axes ---
         AxisBinding moveX{};
         moveX.negative = Binding::Key(SDL_SCANCODE_A);
         moveX.positive = Binding::Key(SDL_SCANCODE_D);
@@ -114,8 +100,8 @@ namespace {
         map.bindAxis(Axis::MoveX, moveX);
 
         AxisBinding moveY{};
-        moveY.negative = Binding::Key(SDL_SCANCODE_W); // up
-        moveY.positive = Binding::Key(SDL_SCANCODE_S); // down
+        moveY.negative = Binding::Key(SDL_SCANCODE_W);
+        moveY.positive = Binding::Key(SDL_SCANCODE_S);
         moveY.negative2 = Binding::Key(SDL_SCANCODE_UP);
         moveY.positive2 = Binding::Key(SDL_SCANCODE_DOWN);
         moveY.useGamepadAxis = true;
@@ -126,12 +112,6 @@ namespace {
         map.bindAxis(Axis::MoveY, moveY);
     }
 
-    // NOTE:
-    // If your Platform::Input API uses a different function name, adjust these two calls:
-    // - Input::keyPressed(SDL_SCANCODE_F5)
-    // - Input::keyPressed(SDL_SCANCODE_F9)
-    //
-    // Some codebases use Input::isKeyPressed or Input::getKeyDown etc.
     static bool KeyPressed(SDL_Scancode sc) {
         return HBE::Platform::Input::IsKeyPressed(sc);
     }
@@ -140,23 +120,16 @@ namespace {
 void GameLayer::onAttach(Application& app) {
     m_app = &app;
     m_console.setWindow(app.platform().getWindow());
-    // Ensure paths are initialized (prevents empty-string watches if header defaults differ)
+
     if (m_tileMapPath.empty())  m_tileMapPath = "maps/test_map.json";
     if (m_uiThemePath.empty())  m_uiThemePath = "ui/theme.json";
     if (m_spriteVsPath.empty()) m_spriteVsPath = "shaders/sprite.vert";
     if (m_spriteFsPath.empty()) m_spriteFsPath = "shaders/sprite.frag";
 
-    // ------------------------------------------------------------
-    // Input Mapping Layer:
-    // - Game defines defaults here
-    // - Player overrides loaded from bindings.cfg
-    // ------------------------------------------------------------
     HBE::Input::Initialize(&RegisterDefaultBindings);
-    HBE::Input::Get().loadFromFile(HBE::Core::AssetPaths::ResolveUser(BINDINGS_LOGICAL)); // safe if missing (returns false)
-
+    HBE::Input::Get().loadFromFile(HBE::Core::AssetPaths::ResolveUser(BINDINGS_LOGICAL));
     HBE::Core::LogInfo(std::string("CWD: ") + std::filesystem::current_path().string());
 
-    // camera setup (logical resolution)
     m_camera.x = std::round(m_camera.x);
     m_camera.y = std::round(m_camera.y);
     m_camera.zoom = 1.0f;
@@ -170,7 +143,6 @@ void GameLayer::onAttach(Application& app) {
 
     buildSpritePipeline();
 
-    // -- Shaders ------------------------------------
     auto& ppResources = m_app->resources();
     namespace ap = HBE::Core::AssetPaths;
     const std::string ppVs = ap::Resolve("shaders/pp_pass.vert");
@@ -195,9 +167,9 @@ void GameLayer::onAttach(Application& app) {
             HBE::Renderer::PostProcessEffect fx{};
             fx.name = "bloom";
             fx.shader = bloomShader;
-            fx.enabled = false;         // off by default; toggle in dev UI
-            fx.params[0] = 0.7f;        // uThreshold
-            fx.params[1] = 1.2f;        // uIntensity
+            fx.enabled = false;
+            fx.params[0] = 0.7f;
+            fx.params[1] = 1.2f;
             m_postProcess.addEffect(std::move(fx));
         }
         {
@@ -205,18 +177,18 @@ void GameLayer::onAttach(Application& app) {
             fx.name = "colorgrade";
             fx.shader = gradeShader;
             fx.enabled = false;
-            fx.params[0] = 0.0f;        // uBrightness
-            fx.params[1] = 1.0f;        // uContrast
-            fx.params[2] = 1.0f;        // uSaturation
+            fx.params[0] = 0.0f;
+            fx.params[1] = 1.0f;
+            fx.params[2] = 1.0f;
             m_postProcess.addEffect(std::move(fx));
         }
         {
             HBE::Renderer::PostProcessEffect fx{};
             fx.name = "vignette";
             fx.shader = vigShader;
-            fx.enabled = true;          // on by default — subtle but always nice
-            fx.params[0] = 0.75f;       // uRadius
-            fx.params[1] = 0.45f;       // uSoftness
+            fx.enabled = true;
+            fx.params[0] = 0.75f;
+            fx.params[1] = 0.45f;
             m_postProcess.addEffect(std::move(fx));
         }
         {
@@ -224,8 +196,8 @@ void GameLayer::onAttach(Application& app) {
             fx.name = "crt";
             fx.shader = crtShader;
             fx.enabled = false;
-            fx.params[0] = 0.3f;        // uScanlineStrength
-            fx.params[1] = 4.0f;        // uCurvature
+            fx.params[0] = 0.3f;
+            fx.params[1] = 4.0f;
             m_postProcess.addEffect(std::move(fx));
         }
         {
@@ -233,18 +205,16 @@ void GameLayer::onAttach(Application& app) {
             fx.name = "pixelate";
             fx.shader = pixelShader;
             fx.enabled = false;
-            fx.params[0] = 4.0f;        // uPixelSize
+            fx.params[0] = 4.0f;
             m_postProcess.addEffect(std::move(fx));
         }
 
-        // Cache effect pointers for the dev UI.
         m_fxBloom = m_postProcess.getEffect("bloom");
         m_fxColorGrade = m_postProcess.getEffect("colorgrade");
         m_fxVignette = m_postProcess.getEffect("vignette");
         m_fxCrt = m_postProcess.getEffect("crt");
         m_fxPixelate = m_postProcess.getEffect("pixelate");
 
-        // Register with the renderer.
         m_app->gl().setPostProcessStack(&m_postProcess);
 
         LogInfo("Post-process stack initialized.");
@@ -253,15 +223,9 @@ void GameLayer::onAttach(Application& app) {
         LogError("Post-process stack failed to initialize — running without effects.");
     }
 
-    // ── Particle System ────────────────────────────────────────────────────────
     m_particles.initialize(app.resources(), m_quadMesh);
-
     m_particles.registerEffect("rain", makeRain());
     m_particles.registerEffect("player_dust", makePlayerDust());
-
-    // Rain is always active. Emitter is a rectangle centred on the camera each frame so drops
-    // spawn throughout the visible area (not just at the top edge). The first onUpdate frame
-    // pre-warms it so the world starts already populated with drops at every height.
     m_rainHandle = m_particles.spawnManaged("rain", m_camera.x, m_camera.y);
 
     HBE::Renderer::UI::UIStyle style;
@@ -271,7 +235,6 @@ void GameLayer::onAttach(Application& app) {
     style.spacing = 10.0f;
     m_ui.setStyle(style);
 
-    // load Tilemap
     std::string err;
     if (!HBE::Renderer::TileMapLoader::loadFromJsonFile(
         ap::Resolve(m_tileMapPath), m_tileMap, &err))
@@ -281,7 +244,6 @@ void GameLayer::onAttach(Application& app) {
         return;
     }
 
-    // build tile renderer (uses same sprite shader + quad mesh)
     if (!m_tileRenderer.build(m_app->renderer2D(), m_app->resources(), m_spriteShader, m_quadMesh, m_tileMap)) {
         LogFatal("Failed to build TileMapRenderer");
         m_app->requestQuit();
@@ -289,14 +251,8 @@ void GameLayer::onAttach(Application& app) {
     }
 
     setupHotReloadWatches();
-    hotReloadUITheme(); // apply theme at startup (optional, but nice)
+    hotReloadUITheme();
 
-    // Load test sound
-        // ---------------------------------------------------------------------
-    // Audio bootstrap
-    // For now we only have test_sound.wav in the repo, so reuse it for
-    // multiple logical events until you drop in real assets.
-    // ---------------------------------------------------------------------
     app.audio().setMasterGain(1.0f);
     app.audio().setBusGain(HBE::Platform::Audio::Bus::Music, 0.65f);
     app.audio().setBusGain(HBE::Platform::Audio::Bus::SFX, 1.0f);
@@ -308,12 +264,6 @@ void GameLayer::onAttach(Application& app) {
     app.audio().loadSound("hit", testSoundPath, true);
     app.audio().loadSound("ui_blip", testSoundPath, true);
 
-    // When you add a real music file later, swap the path below.
-    // Example:
-    // app.audio().loadMusic("bgm_main", "assets/audio/forest_theme.ogg");
-    // app.audio().playMusic("bgm_main", -1, 0.8f);
-
-    // choose collision layer by name
     m_collisionLayer = m_tileMap.findLayer("Ground");
     if (!m_collisionLayer) {
         LogFatal("Tilemap missing collision layer named 'Ground'");
@@ -321,26 +271,19 @@ void GameLayer::onAttach(Application& app) {
         return;
     }
 
-    // Sample the top-of-tile colors used to tint the player-dust particles.
     if (!HBE::Renderer::TileMapLoader::sampleTileTopColors(m_tileMap, m_tileTopColors)) {
         HBE::Core::LogInfo("TileMapLoader::sampleTileTopColors failed; player dust will use fallback color.");
     }
 
-    // Hook Scene2D physics/collision to this tilemap layer
     m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
 
-    // Physics-lite tuning (gravity + substeps)
     {
         HBE::Renderer::Physics2DSettings phys{};
-        phys.gravityY = -1800.0f;         // world units / s^2 (negative = down)
-        phys.maxSubSteps = 4;             // stability
-        phys.maxStepDt = 1.0f / 120.0f;   // stability
+        phys.gravityY = -1800.0f;      
+        phys.maxSubSteps = 4;          
+        phys.maxStepDt = 1.0f / 120.0f;
         m_scene.setPhysics2DSettings(phys);
     }
-
-    // -------------------------
-    // Dev Console commands
-    // -------------------------
     m_console.print("Console ready. Type 'help'.");
 
     m_console.registerCommand("help", "List commands", [this](const std::vector<std::string>&) {
@@ -420,25 +363,17 @@ void GameLayer::onAttach(Application& app) {
         m_console.print("Sprite shader reloaded.");
         });
 
-    // make sure scene matches current toggle
     m_scene.setCullingEnabled(m_enableCulling);
 
-    // -----------------------------
-    // ECS: attach gameplay components + scripts
-    // -----------------------------
     auto& reg = m_scene.registry();
 
-    // Tag your initial entities (helps scene save find �Player�/�Goblin�)
     if (reg.valid(m_soldierEntity)) {
-        if (!reg.has<HBE::ECS::TagComponent>(m_soldierEntity))
-            reg.emplace<HBE::ECS::TagComponent>(m_soldierEntity, HBE::ECS::TagComponent{ "Player" });
+        reg.emplace<HBE::ECS::TagComponent>(m_soldierEntity, HBE::ECS::TagComponent{ "Player" });
     }
     if (reg.valid(m_goblinEntity)) {
-        if (!reg.has<HBE::ECS::TagComponent>(m_goblinEntity))
-            reg.emplace<HBE::ECS::TagComponent>(m_goblinEntity, HBE::ECS::TagComponent{ "Goblin" });
+        reg.emplace<HBE::ECS::TagComponent>(m_goblinEntity, HBE::ECS::TagComponent{ "Goblin" });
     }
 
-    // Player (soldier): Collider + Rigidbody + Script controller
     if (reg.valid(m_soldierEntity)) {
         const float pxScale = SPRITE_PIXEL_SCALE;
 
@@ -455,10 +390,9 @@ void GameLayer::onAttach(Application& app) {
         rb.linearDamping = 0.0f;
         rb.isStatic = false;
 
-        // ---- PLATFORMER DEFAULTS ----
         rb.useGravity = true;
         rb.gravityScale = 1.0f;
-        rb.maxFallSpeed = -2200.0f; // clamp falling speed (negative down)
+        rb.maxFallSpeed = -2200.0f;
         rb.maxStepUp = m_tileMap.worldTileH() * 0.35f;
         rb.enableOneWay = true;
         rb.enableSlopes = true;
@@ -470,14 +404,12 @@ void GameLayer::onAttach(Application& app) {
         sc.name = "PlayerController";
         sc.onUpdate = [this](HBE::ECS::Entity e, float dt) {
             if (m_console.isOpen()) {
-                // Optional: kill movement so player doesn't keep sliding
                 auto& r = m_scene.registry();
                 if (r.has<HBE::ECS::RigidBody2D>(e)) {
                     auto& body = r.get<HBE::ECS::RigidBody2D>(e);
                     body.accelX = 0.0f;
                     body.accelY = 0.0f;
                     body.velX = 0.0f;
-                    // don't zero velY if you want gravity to keep acting while typing
                 }
                 return;
             }
@@ -486,7 +418,6 @@ void GameLayer::onAttach(Application& app) {
 
             auto& body = r.get<HBE::ECS::RigidBody2D>(e);
 
-            // -------- INPUT (mapped) --------
             const float inputX = HBE::Input::AxisValue(HBE::Input::Axis::MoveX);
             const float inputY = HBE::Input::AxisValue(HBE::Input::Axis::MoveY);
 
@@ -494,7 +425,6 @@ void GameLayer::onAttach(Application& app) {
             const bool JumpPressed = HBE::Input::ActionPressed(HBE::Input::Action::Jump);
             const bool AttackPressed = HBE::Input::ActionPressed(HBE::Input::Action::Attack);
 
-            // -------- TUNING --------
             const float moveSpeed = 520.0f;
             const float accelGround = 5200.0f;
             const float accelAir = 3200.0f;
@@ -538,7 +468,6 @@ void GameLayer::onAttach(Application& app) {
             reg.emplace<HBE::ECS::Script>(m_soldierEntity, std::move(sc));
     }
 
-    // Goblin: Collider + STATIC Rigidbody + optional script
     if (reg.valid(m_goblinEntity)) {
         const float pxScale = SPRITE_PIXEL_SCALE;
 
@@ -585,7 +514,6 @@ void GameLayer::buildSpritePipeline() {
         HBE::Core::AssetPaths::Resolve(m_spriteVsPath),
         HBE::Core::AssetPaths::Resolve(m_spriteFsPath));
 
-    // Fallback (only if files missing)
     if (!m_spriteShader) {
         const char* spriteVs = R"(#version 330 core
 layout(location = 0) in vec3 aPos;
@@ -640,7 +568,6 @@ void main() {
         }
     }
 
-    // quad mesh (pos + uv) as 2 triangles (6 verts) for the current Mesh API
     std::vector<float> quadVerts = {
         // tri 1
         -0.5f, -0.5f, 0.0f,   0.0f, 0.0f,
@@ -660,26 +587,20 @@ void main() {
         return;
     }
 
-    // Tell Renderer2D which mesh identifies a sprite-quad, so anything drawn with
-    // this mesh flows through the batch (uses the batch VAO with per-vertex color)
-    // instead of falling back to the mesh's own VAO (which lacks aColor).
     m_app->renderer2D().setSpriteQuadMesh(m_quadMesh);
 
-    // Debug draw setup (uses the same quad mesh)
     if (!m_debug.initialize(resources, m_quadMesh)) {
         LogFatal("GameLayer: DebugDraw2D init failed");
         m_app->requestQuit();
         return;
     }
 
-    // Text renderer
     if (!m_text.initialize(m_app->resources(), m_spriteShader, m_quadMesh)) {
         LogFatal("GameLayer: TextRenderer2D init failed");
         m_app->requestQuit();
         return;
     }
 
-    // Font
     const std::string fontPath = HBE::Core::AssetPaths::Resolve("fonts/BoldPixels.ttf");
     if (!m_text.loadSDFont(m_app->resources(),
         "ui",
@@ -694,7 +615,6 @@ void main() {
         m_text.setActiveFont("ui");
     }
 
-    // Sprite sheet
     SpriteSheetDesc desc{};
     desc.frameWidth = 100;
     desc.frameHeight = 100;
@@ -713,14 +633,12 @@ void main() {
         return;
     }
 
-    // materials
     m_goblinMaterial.shader = m_spriteShader;
     m_goblinMaterial.texture = m_goblinSheet.texture;
 
     m_soldierMaterial.shader = m_spriteShader;
     m_soldierMaterial.texture = m_soldierSheet.texture;
 
-    // entities
     RenderItem goblin{};
     goblin.mesh = m_quadMesh;
     goblin.material = &m_goblinMaterial;
@@ -728,7 +646,7 @@ void main() {
     goblin.transform.posY = 95.0f;
     goblin.transform.scaleX = desc.frameWidth * SPRITE_PIXEL_SCALE;
     goblin.transform.scaleY = desc.frameHeight * SPRITE_PIXEL_SCALE;
-    goblin.layer = 100; // base entity layer
+    goblin.layer = 100;
     goblin.sortKey = goblin.transform.posY;
 
     RenderItem soldier{};
@@ -739,7 +657,6 @@ void main() {
     soldier.transform.scaleX = desc.frameWidth * SPRITE_PIXEL_SCALE;
     soldier.transform.scaleY = desc.frameHeight * SPRITE_PIXEL_SCALE;
 
-    // Make player render above goblin:
     soldier.layer = 200;
     soldier.sortKey = soldier.transform.posY;
 
@@ -749,11 +666,6 @@ void main() {
     m_goblinEntity  = m_scene.createEntity(goblin);
     m_soldierEntity = m_scene.createEntity(soldier);
 
-    // -----------------------------
-    // Per-entity anim SM setup
-    // -----------------------------
-
-    // Goblin
     if (auto* gAnim = m_scene.addSpriteAnimator(m_goblinEntity, &m_goblinSheet)) {
         gAnim->addClip({ "Idle",   0, 0, 6, 0.10f, true,  1.0f });
         gAnim->addClip({ "Run",    1, 0, 6, 0.08f, true,  1.0f });
@@ -773,9 +685,10 @@ void main() {
         gAnim->addTransitionFinished("Attack", "Idle");
 
         gAnim->setState("Idle", true);
+
+        SetAnimatorPreset(m_scene.registry(), m_goblinEntity, "GoblinAnimator");
     }
 
-    // Soldier
     if (auto* sAnim = m_scene.addSpriteAnimator(m_soldierEntity, &m_soldierSheet)) {
         sAnim->addClip({ "Idle",   0, 0, 6, 0.10f, true,  1.0f });
         sAnim->addClip({ "Run",    1, 0, 8, 0.10f, true,  1.0f });
@@ -795,29 +708,26 @@ void main() {
         sAnim->addTransitionFinished("Attack", "Idle");
 
         sAnim->setState("Idle", true);
+
+        SetAnimatorPreset(m_scene.registry(), m_soldierEntity, "SoldierAnimator");
     }
 }
 
 void GameLayer::onUpdate(float dt) {
-    // fullscreen toggle stays in layer for now
     if (HBE::Input::ActionPressed(HBE::Input::Action::FullscreenToggle)) {
-        // (left blank like your current file)
+
     }
 
-    // Controlled entity (for camera follow)
     Transform2D* playerTr = m_scene.getTransform(m_soldierEntity);
     if (!playerTr) return;
-
-    // Keep the audio listener centered on the player/camera.
     m_app->audio().setListenerPosition(playerTr->posX, playerTr->posY);
 
-    // Quick audio test keys
     if (KeyPressed(SDL_SCANCODE_T)) {
         HBE::Platform::Audio::PlayParams p;
         p.bus = HBE::Platform::Audio::Bus::SFX;
         p.gain = 1.0f;
         p.positional = true;
-        p.worldX = playerTr->posX + 120.0f; // sound slightly to the right
+        p.worldX = playerTr->posX + 120.0f;
         p.worldY = playerTr->posY;
         p.minDistance = 10.0f;
         p.maxDistance = 350.0f;
@@ -834,7 +744,6 @@ void GameLayer::onUpdate(float dt) {
         m_app->audio().resumeBus(HBE::Platform::Audio::Bus::SFX);
     }
 
-    // ---- stats ----
     m_uiAnimT += dt;
     m_statTimer += (double)dt;
     m_updateCount++;
@@ -851,10 +760,6 @@ void GameLayer::onUpdate(float dt) {
         m_statTimer = 0.0;
     }
 
-    // -------------------------
-    // Scene Save/Load hotkeys
-    // -------------------------
-    // NOTE: adjust KeyPressed() mapping if your Platform::Input uses different names.
     if (KeyPressed(SDL_SCANCODE_F5)) {
         std::string err;
 
@@ -875,15 +780,10 @@ void GameLayer::onUpdate(float dt) {
             };
 
         namespace ap = HBE::Core::AssetPaths;
-        // Debug builds overwrite the tracked scene file; shipping builds
-        // must not touch the (potentially read-only) asset root.
         const std::string scenePath = kSceneSaveGoesToUserData
             ? ap::ResolveUser(SCENE_LOGICAL)
             : ap::Resolve(SCENE_LOGICAL);
 
-        // Make sure the parent directory exists for user-data saves — the
-        // first time you press F5 in a shipping build, <userDataRoot>/scenes/
-        // does not exist yet.
         if (kSceneSaveGoesToUserData) {
             std::error_code ec;
             std::filesystem::create_directories(
@@ -921,10 +821,9 @@ void GameLayer::onUpdate(float dt) {
             return nullptr;
             };
 
-        // Bind scripts by name (re-attach lambdas after loading)
-        loadCb.bindScript = [this](HBE::ECS::Entity e, const std::string& name, HBE::Renderer::Scene2D& scene) {
+        loadCb.bindScript = [this](HBE::ECS::Entity e, const std::string& name, HBE::Renderer::Scene2D& scene) -> bool {
             auto& reg = scene.registry();
-            if (!reg.has<HBE::ECS::Script>(e)) return;
+            if (!reg.has<HBE::ECS::Script>(e)) return false;
 
             auto& sc = reg.get<HBE::ECS::Script>(e);
             sc.name = name;
@@ -978,6 +877,7 @@ void GameLayer::onUpdate(float dt) {
                         if (AttackPressed) sAnim->trigger("attack");
                     }
                     };
+                return true;
             }
             else if (name == "GoblinTest") {
                 sc.onUpdate = [this](HBE::ECS::Entity ent, float dt) {
@@ -989,10 +889,11 @@ void GameLayer::onUpdate(float dt) {
                         }
                     }
                     };
+                return true;
             }
+            return false;
             };
 
-        // Animator preset builder (rebuild the SM from a preset name)
         loadCb.buildAnimatorPreset = [this](HBE::ECS::Entity e,
             const std::string& preset,
             HBE::Renderer::SpriteAnimationStateMachine& sm,
@@ -1040,8 +941,6 @@ void GameLayer::onUpdate(float dt) {
             };
 
         namespace ap = HBE::Core::AssetPaths;
-        // Prefer the user-data override (from a prior F5 in shipping mode);
-        // fall back to the tracked asset-root scene otherwise.
         std::string scenePath = ap::ResolveUser(SCENE_LOGICAL);
         {
             std::error_code ec;
@@ -1059,15 +958,14 @@ void GameLayer::onUpdate(float dt) {
         else {
             LogInfo("Scene loaded: " + scenePath);
 
-            // Re-hook tilemap if scene file requested a different one
             if (!tilemapPath.empty()) {
-                m_tileMapPath = ap::StripLegacyAssetsPrefix(tilemapPath);
+                // The serializer already returned a logical path
+                // (item 14 doc 08).
+                m_tileMapPath = tilemapPath;
             }
 
-            // Rebuild tilemap (and collision context) using your existing hot-reload path
             hotReloadTileMap();
 
-            // Re-find key entities by tag so camera follows correctly
             m_soldierEntity = {};
             m_goblinEntity = {};
 
@@ -1079,19 +977,13 @@ void GameLayer::onUpdate(float dt) {
             }
         }
 
-        // FPS history (instant)
         float instFps = (dt > 0.00001f) ? (1.0f / dt) : 0.0f;
         m_fpsHistory.push_back(instFps);
         if ((int)m_fpsHistory.size() > m_fpsHistoryMax) {
             m_fpsHistory.erase(m_fpsHistory.begin(), m_fpsHistory.begin() + (m_fpsHistory.size() - m_fpsHistoryMax));
         }
     }
-
-    // Hot reload poll
     m_watcher.poll(dt);
-
-    // Tick scripts + physics + animators.
-    // Catch animation events here.
     m_scene.update(dt, [&](const std::string& ev) {
         Transform2D* tr = m_scene.getTransform(m_soldierEntity);
         const float px = tr ? tr->posX : m_camera.x;
@@ -1129,7 +1021,6 @@ void GameLayer::onUpdate(float dt) {
         }
         });
 
-    // Player dust: while grounded and moving, kick up tinted dust at the feet.
     {
         auto& reg = m_scene.registry();
         if (reg.has<HBE::ECS::RigidBody2D>(m_soldierEntity) &&
@@ -1147,18 +1038,14 @@ void GameLayer::onUpdate(float dt) {
                     const float feetX = playerTr->posX + col.offsetX;
                     const float feetY = playerTr->posY + col.offsetY - col.halfH;
                     spawnPlayerDustAtFeet(feetX, feetY);
-                    m_playerDustCooldown = 0.14f; // ~7 puffs per second while running
+                    m_playerDustCooldown = 0.14f;
                 }
             }
             else {
-                m_playerDustCooldown = 0.0f; // fire immediately next time we start moving
+                m_playerDustCooldown = 0.0f;
             }
         }
     }
-
-    // Keep rain centred on the camera so the spawn rectangle always covers the viewport.
-    // On the first update, snap the camera to the player first so the pre-warm samples the
-    // right area — otherwise the emitter (and all pre-warmed drops) end up at the world origin.
     if (!m_rainPreWarmed) {
         m_camera.x = playerTr->posX;
         m_camera.y = playerTr->posY;
@@ -1169,7 +1056,6 @@ void GameLayer::onUpdate(float dt) {
         m_particles.setPosition(m_rainHandle, m_camera.x, m_camera.y);
 
     if (!m_rainPreWarmed) {
-        // Simulate ~2 seconds so the world starts already populated with drops at every height.
         for (int i = 0; i < 60; ++i) {
             m_particles.update(1.0f / 30.0f);
         }
@@ -1177,19 +1063,15 @@ void GameLayer::onUpdate(float dt) {
     }
 
     m_particles.update(dt);
-
-    // camera follow
     m_camera.x = playerTr->posX;
     m_camera.y = playerTr->posY;
     m_app->gl().setCamera(m_camera);
 
-    // debug popup aging / movement
     for (auto& p : m_popups) {
         p.life -= dt;
         p.y += p.floatSpeed * dt;
     }
 
-    // remove dead
     m_popups.erase(
         std::remove_if(m_popups.begin(), m_popups.end(),
             [](const DebugPopup& p) { return p.life <= 0.0f; }),
@@ -1199,22 +1081,15 @@ void GameLayer::onUpdate(float dt) {
 
 void GameLayer::onRender() {
     m_frameCount++;
-
-    // Reset per-frame text renderer state
     m_text.beginFrame(m_frameCount);
 
     Renderer2D& r2d = m_app->renderer2D();
     m_ui.beginFrame(m_lastDt);
 
-    // -------------------------
-    // PASS 1: WORLD
-    // -------------------------
     r2d.beginScene(m_camera, HBE::Renderer::RenderPass::World);
 
-    // draw map
     m_tileRenderer.draw(r2d, m_tileMap);
 
-    // --- DAMAGE TEXT (WORLD SPACE) ---
     HBE::Renderer::TextRenderer2D::TextAnim dmg{};
     dmg.t = std::fmod(m_uiAnimT, 1.0f);
     dmg.duration = 1.0f;
@@ -1241,13 +1116,9 @@ void GameLayer::onRender() {
             dmg);
     }
 
-    // draw sprites/entities
     m_scene.render(r2d);
-
-    // ── Particles (above sprites at layer 200) ─────────────────────────────────
     m_particles.render(r2d);
 
-    // debug draw (WORLD)
     if (m_debugDraw) {
         auto& reg = m_scene.registry();
 
@@ -1260,8 +1131,6 @@ void GameLayer::onRender() {
                 float cy = tr.posY + col.offsetY;
                 float w = col.halfW * 2.0f;
                 float h = col.halfH * 2.0f;
-
-                // color: trigger=yellow, dynamic=green, static=cyan-ish
                 float r = 0.0f, g = 1.0f, b = 0.0f, a = 1.0f;
 
                 if (col.isTrigger) { r = 1.0f; g = 1.0f; b = 0.2f; }
@@ -1272,7 +1141,6 @@ void GameLayer::onRender() {
         }
     }
 
-    // world popups
     for (const auto& p : m_popups) {
         float t = (p.maxLife > 0.0f) ? (p.life / p.maxLife) : 0.0f;
         t = std::clamp(t, 0.0f, 1.0f);
@@ -1285,9 +1153,6 @@ void GameLayer::onRender() {
 
     r2d.endScene();
 
-    // -------------------------
-    // PASS 2: UI (widgets + panels)
-    // -------------------------
     HBE::Renderer::Camera2D uiCam{};
     uiCam.x = LOGICAL_WIDTH * 0.5f;
     uiCam.y = LOGICAL_HEIGHT * 0.5f;
@@ -1297,7 +1162,6 @@ void GameLayer::onRender() {
 
     r2d.beginScene(uiCam, HBE::Renderer::RenderPass::UI);
 
-    // Bind UI renderer dependencies now that we�re in UI space
     m_ui.bind(&m_app->renderer2D(), &m_debug, &m_text);
 
     using namespace HBE::Renderer::UI;
@@ -1350,7 +1214,6 @@ void GameLayer::onRender() {
 
         m_ui.endPanel();
 
-        // ── Post-Processing panel ──────────────────────────────────────────
         UIRect ppRect{ 20.0f, LOGICAL_HEIGHT - 440.0f, 340.0f, 390.0f };
         if (m_ui.beginPanel("pp_panel", ppRect, "Post FX")) {
 
@@ -1411,11 +1274,10 @@ void GameLayer::onRender() {
         g.x = 20.0f;
         g.y = 305.0f;
         g.w = 260.0f;
-        g.h = 50.0f; // <- actually small now
+        g.h = 50.0f;
 
         m_ui.beginPanel("fps_graph", g, "FPS");
 
-        // Show current (single line only)
         char buf[128];
         std::snprintf(buf, sizeof(buf), "FPS %.1f  UPS %.1f  dt %.3f", m_fps, m_ups, m_lastDt);
         m_ui.label(buf, true);
@@ -1436,7 +1298,6 @@ void GameLayer::onRender() {
 
         m_ui.label("Entities", true);
 
-        // live list (Transform-driven)
         int shown = 0;
         for (auto e : reg.view<HBE::Renderer::Transform2D>()) {
             if (shown++ >= 12) { // keep it readable for now
@@ -1458,20 +1319,17 @@ void GameLayer::onRender() {
 
         m_ui.spacing(10.0f);
 
-        // selected details
         if (reg.valid(m_selectedEntity)) {
             std::string header = "Selected: " + std::to_string((uint32_t)m_selectedEntity);
             m_ui.label(header.c_str(), false);
             m_ui.spacing(6.0f);
 
-            // TAG
             if (reg.has<HBE::ECS::TagComponent>(m_selectedEntity)) {
                 const auto& tag = reg.get<HBE::ECS::TagComponent>(m_selectedEntity).tag;
                 std::string tagLine = "Tag: " + tag;
                 m_ui.label(tagLine.c_str(), true);
             }
 
-            // TRANSFORM
             if (reg.has<HBE::Renderer::Transform2D>(m_selectedEntity)) {
                 auto& tr = reg.get<HBE::Renderer::Transform2D>(m_selectedEntity);
                 m_ui.label("Transform", true);
@@ -1486,7 +1344,6 @@ void GameLayer::onRender() {
                 m_ui.spacing(6.0f);
             }
 
-            // SPRITE
             if (reg.has<HBE::Renderer::SpriteComponent2D>(m_selectedEntity)) {
                 auto& spr = reg.get<HBE::Renderer::SpriteComponent2D>(m_selectedEntity);
                 m_ui.label("Sprite", true);
@@ -1496,7 +1353,6 @@ void GameLayer::onRender() {
                 m_ui.spacing(6.0f);
             }
 
-            // COLLIDER
             if (reg.has<HBE::ECS::Collider2D>(m_selectedEntity)) {
                 auto& col = reg.get<HBE::ECS::Collider2D>(m_selectedEntity);
                 m_ui.label("Collider2D", true);
@@ -1508,7 +1364,6 @@ void GameLayer::onRender() {
                 m_ui.spacing(6.0f);
             }
 
-            // RIGIDBODY
             if (reg.has<HBE::ECS::RigidBody2D>(m_selectedEntity)) {
                 auto& rb = reg.get<HBE::ECS::RigidBody2D>(m_selectedEntity);
                 m_ui.label("RigidBody2D", true);
@@ -1536,9 +1391,6 @@ void GameLayer::onRender() {
 
     r2d.endScene();
 
-    // -------------------------
-    // PASS 3: OVERLAY (dev console — always on top of world + UI)
-    // -------------------------
     r2d.beginScene(uiCam, HBE::Renderer::RenderPass::Overlay);
 
     UIRect con;
@@ -1557,28 +1409,22 @@ void GameLayer::onRender() {
 bool GameLayer::onEvent(HBE::Core::Event& e) {
     using namespace HBE::Core;
 
-    // UI can still receive mouse events
     m_ui.onEvent(e);
 
-    // Toggle console with ~ (grave)
     if (e.type() == EventType::KeyPressed) {
         auto& ke = static_cast<KeyPressedEvent&>(e);
-       
-        // Console Toggle (Grave/tilde) should work even when console is open
+
         if (ke.keyScancode == SDL_SCANCODE_GRAVE) {
             m_console.toggle();
             e.handled = true;
             return true;
         }
 
-        // if console is open, let it consume key events FIRST
-        // Don't process other hotkeys while typing in console
         if (m_console.isOpen()) {
             m_console.onEvent(e);
-            return e.handled; // Stops here, do not process F1-F5 while console is open
+            return e.handled;
         }
 
-        // only process dev hotkeys if console is CLOSED
         if (ke.keyScancode == SDL_SCANCODE_F1) {
             bool anyOn = (m_showDevTools || m_showInspector || m_showFpsGraph);
             m_showDevTools = !anyOn;
@@ -1627,7 +1473,6 @@ void GameLayer::spawnPopup(float x, float y, const std::string& text,
 void GameLayer::spawnPlayerDustAtFeet(float feetX, float feetY) {
     using namespace HBE::Renderer;
 
-    // Fallback dust color if we can't sample the tile below the player.
     float r = 0.82f, g = 0.72f, b = 0.55f;
 
     if (m_collisionLayer) {
@@ -1636,9 +1481,6 @@ void GameLayer::spawnPlayerDustAtFeet(float feetX, float feetY) {
 
         if (tw > 0.0f && th > 0.0f) {
             const int tx = (int)std::floor(feetX / tw);
-            // Sample slightly below the feet so we hit the tile the player is standing on rather
-            // than the empty space they occupy. Then walk down a couple of tiles in case the very
-            // top row is a one-way / slope with a transparent leading edge.
             const int ty0 = (int)std::floor((feetY - 0.5f) / th);
             int tileId = 0;
             for (int probe = 0; probe < 3 && tileId == 0; ++probe) {
@@ -1655,8 +1497,6 @@ void GameLayer::spawnPlayerDustAtFeet(float feetX, float feetY) {
         }
     }
 
-    // Re-register player_dust with the tinted colors. ParticleSystem copies the config on spawn,
-    // so this cheap swap changes only the next burst's colors.
     EmitterConfig cfg = makePlayerDust()[0];
     cfg.startR = r;         cfg.startG = g;         cfg.startB = b;
     cfg.endR   = r * 0.55f; cfg.endG   = g * 0.55f; cfg.endB   = b * 0.55f;
@@ -1690,8 +1530,6 @@ void GameLayer::setupHotReloadWatches() {
 void GameLayer::hotReloadShader() {
     if (!m_app) return;
     bool ok = m_app->resources().reloadShader("sprite");
-
-    // (world-space popup: may be off-screen depending on camera)
     spawnPopup(20.0f, 680.0f,
         ok ? "Shader reloaded: sprite" : "Shader reload FAILED (see log)",
         ok ? HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f } : HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f },
@@ -1699,7 +1537,6 @@ void GameLayer::hotReloadShader() {
 }
 
 void GameLayer::hotReloadTileMap() {
-    // Load New Map    
     HBE::Renderer::TileMap newMap{};
     std::string err;
     namespace ap = HBE::Core::AssetPaths;
@@ -1712,28 +1549,20 @@ void GameLayer::hotReloadTileMap() {
             HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
         return;
     }
-
-    // Check for required layers before committing
     auto groundLayer = newMap.findLayer("Ground");
     if (!groundLayer) {
         LogError("TileMap hot-reload: missing required 'Ground' layer");
         spawnPopup(20.0f, 650.0f, "Tilemap reload FAILED: missing required 'Ground' layer", HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f }, 1.5f, 0.0f);
         return;
     }
-    
-    // Validations passed, safe to commit changes
     m_tileMap = std::move(newMap);
-
-    // these should succeed
     m_tileRenderer.build(m_app->renderer2D(), m_app->resources(), m_spriteShader, m_quadMesh, m_tileMap);
     m_collisionLayer = m_tileMap.findLayer("Ground");
 
-    // update collision context
     if (m_collisionLayer) {
         m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
     }
 
-    // Re-sample tile top colors for the new map
     HBE::Renderer::TileMapLoader::sampleTileTopColors(m_tileMap, m_tileTopColors);
 
     m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);

@@ -18,4 +18,8 @@ namespace HBE::ECS {
     struct TagComponent {
         std::string tag;
     };
+
+    struct AnimatorPresetComponent {
+        std::string preset;
+    };
 }
