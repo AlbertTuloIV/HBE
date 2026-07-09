@@ -209,27 +209,12 @@ namespace HBE::Core::AssetPaths {
             if (fs::exists(candidate, ec)) return candidate.string();
         }
 
-        return Resolve(StripLegacyAssetsPrefix(embeddedRelPath));
+        return Resolve(embeddedRelPath);
     }
 
     bool Exists(std::string_view logicalRelPath) {
         std::error_code ec;
         return fs::exists(Resolve(logicalRelPath), ec);
-    }
-
-    std::string StripLegacyAssetsPrefix(std::string_view path) {
-        std::string norm = normalizeSlashes(path);
-        const std::string_view prefix = "assets/";
-        if (norm.size() >= prefix.size() &&
-            std::equal(prefix.begin(), prefix.end(), norm.begin(),
-                [](char a, char b) {
-                    return std::tolower((unsigned char)a) ==
-                        std::tolower((unsigned char)b);
-                }))
-        {
-            return norm.substr(prefix.size());
-        }
-        return norm;
     }
 
 }

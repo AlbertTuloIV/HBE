@@ -14,6 +14,9 @@
 
 #include <fstream>
 #include <sstream>
+#include <vector>
+#include <unordered_map>
+#include <functional>
 #include <json.hpp>
 
 using json = nlohmann::json;
@@ -54,24 +57,19 @@ namespace HBE::Renderer {
         t.rotation = j.value("rot", 0.0f);
     }
 
-    static json toJsonSprite(const SpriteComponent2D& s,
-        const SceneSaveCallbacks& cb)
+    static json toJsonSprite(const SpriteComponent2D& s, const SceneSaveCallbacks& cb)
     {
         json j;
         j["layer"] = s.layer;
-        j["sortKey"] = s.sortKey;
         j["sortOffsetY"] = s.sortOffsetY;
-
         j["uvRect"] = { s.uvRect[0], s.uvRect[1], s.uvRect[2], s.uvRect[3] };
-
         if (cb.meshKey) j["mesh"] = cb.meshKey(s.mesh);
         if (cb.materialKey) j["material"] = cb.materialKey(s.material);
 
         return j;
     }
 
-    static bool fromJsonSprite(const json& j, SpriteComponent2D& s,
-        const SceneLoadCallbacks& cb,
+    static bool fromJsonSprite(const json& j, SpriteComponent2D& s, const SceneLoadCallbacks& cb,
         std::string* outError)
     {
         const std::string meshKey = j.value("mesh", "");
@@ -95,7 +93,7 @@ namespace HBE::Renderer {
         }
 
         s.layer = j.value("layer", 0);
-        s.sortKey = j.value("sortKey", 0.0f);
+        s.sortKey = 0.0f;
         s.sortOffsetY = j.value("sortOffsetY", 0.0f);
 
         if (j.contains("uvRect") && j["uvRect"].is_array() && j["uvRect"].size() == 4) {
@@ -105,7 +103,6 @@ namespace HBE::Renderer {
             s.uvRect[3] = j["uvRect"][3].get<float>();
         }
         else {
-            // default visible
             s.uvRect[0] = 0.0f; s.uvRect[1] = 0.0f;
             s.uvRect[2] = 1.0f; s.uvRect[3] = 1.0f;
         }
@@ -133,40 +130,313 @@ namespace HBE::Renderer {
 
     static json toJsonRigidBody(const HBE::ECS::RigidBody2D& r) {
         return json{
-            {"velX", r.velX}, {"velY", r.velY},
-            {"accelX", r.accelX}, {"accelY", r.accelY},
             {"linearDamping", r.linearDamping},
             {"isStatic", r.isStatic},
             {"useGravity", r.useGravity},
             {"gravityScale", r.gravityScale},
-            {"grounded", r.grounded},
             {"maxStepUp", r.maxStepUp},
             {"enableOneWay", r.enableOneWay},
-            {"oneWayDisableTimer", r.oneWayDisableTimer},
             {"enableSlopes", r.enableSlopes},
             {"maxFallSpeed", r.maxFallSpeed}
         };
     }
 
     static void fromJsonRigidBody(const json& j, HBE::ECS::RigidBody2D& r) {
-        r.velX = j.value("velX", 0.0f);
-        r.velY = j.value("velY", 0.0f);
-        r.accelX = j.value("accelX", 0.0f);
-        r.accelY = j.value("accelY", 0.0f);
+        r.velX = 0.0f;
+        r.velY = 0.0f;
+        r.accelX = 0.0f;
+        r.accelY = 0.0f;
+        r.grounded = false;
+        r.oneWayDisableTimer = 0.0f;
         r.linearDamping = j.value("linearDamping", 0.0f);
         r.isStatic = j.value("isStatic", false);
-
         r.useGravity = j.value("useGravity", false);
         r.gravityScale = j.value("gravityScale", 1.0f);
-        r.grounded = j.value("grounded", false);
-
         r.maxStepUp = j.value("maxStepUp", 0.0f);
-
         r.enableOneWay = j.value("enableOneWay", true);
-        r.oneWayDisableTimer = j.value("oneWayDisableTimer", 0.0f);
-
         r.enableSlopes = j.value("enableSlopes", true);
         r.maxFallSpeed = j.value("maxFallSpeed", 0.0f);
+    }
+
+    // ---------------------------------------------------------------------
+    // v1 -> v2 migration
+    // ---------------------------------------------------------------------
+    //
+    // The v1 -> v2 delta is purely subtractive: v2 files never carry
+    // runtime physics/sprite fields, and never carry a placeholder
+    // "preset": "UNSPECIFIED". The loader (docs 03/04) already ignores
+    // those fields at read time; migrateV1toV2 rewrites them in-place
+    // before dispatch so an in-memory json object matches what saveToFile
+    // would produce today.
+    //
+    // This is deliberately conservative - it does not touch fields the
+    // loader still respects, and it does not remove or rename any
+    // component key.
+    static void migrateV1toV2(json& root) {
+        if (!root.contains("entities") || !root["entities"].is_array()) return;
+
+        for (auto& ej : root["entities"]) {
+            if (!ej.contains("components") || !ej["components"].is_object()) continue;
+            json& comps = ej["components"];
+
+            // RigidBody2D: strip runtime fields.
+            if (comps.contains("RigidBody2D") && comps["RigidBody2D"].is_object()) {
+                for (const char* key : {"velX", "velY", "accelX", "accelY",
+                                        "grounded", "oneWayDisableTimer"}) {
+                    comps["RigidBody2D"].erase(key);
+                }
+            }
+
+            // Sprite2D: strip sortKey.
+            if (comps.contains("Sprite2D") && comps["Sprite2D"].is_object()) {
+                comps["Sprite2D"].erase("sortKey");
+            }
+
+            // Animator: replace UNSPECIFIED placeholder with empty string.
+            // Loader treats empty preset as "no rebuild"; caller must
+            // stamp a real preset (doc 02) before the next save.
+            if (comps.contains("Animator") && comps["Animator"].is_object()) {
+                if (comps["Animator"].value("preset", "") == "UNSPECIFIED") {
+                    comps["Animator"]["preset"] = "";
+                }
+            }
+        }
+
+        root["version"] = 2;
+    }
+
+    // Dispatch: apply every migrator that fires below the current version.
+    // For now there's only one hop, but this shape supports future ones
+    // without touching the caller.
+    static void migrateToLatest(json& root) {
+        const int version = root.value("version", 1);
+        if (version < 2) migrateV1toV2(root);
+        // Future: if (version < 3) migrateV2toV3(root);
+    }
+
+    // ---------------------------------------------------------------------
+    // Component dispatch table
+    // ---------------------------------------------------------------------
+
+    struct SceneComponentSchema {
+        std::string key;
+        bool required = false;
+
+        std::function<bool(HBE::ECS::Entity, HBE::ECS::Registry&, const SceneSaveCallbacks&, json&)> save;
+        std::function<bool(HBE::ECS::Entity, HBE::ECS::Registry&, Scene2D&, const SceneLoadCallbacks&, const json&, std::string*)> load;
+        std::function<void(HBE::ECS::Entity, HBE::ECS::Registry&)> installDefault;
+    };
+
+    static const std::vector<SceneComponentSchema>& componentSchemas() {
+        static const std::vector<SceneComponentSchema> table = [] {
+            std::vector<SceneComponentSchema> t;
+
+            // -- Transform2D (required) --
+            t.push_back({
+                "Transform2D",
+                /*required*/ true,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks&, json& out) -> bool {
+                    if (!reg.has<Transform2D>(e)) return false;
+                    out = toJsonTransform(reg.get<Transform2D>(e));
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   Scene2D&, const SceneLoadCallbacks&,
+                   const json& j, std::string*) -> bool {
+                    Transform2D t{};
+                    fromJsonTransform(j, t);
+                    reg.emplace<Transform2D>(e, t);
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg) {
+                    if (!reg.has<Transform2D>(e))
+                        reg.emplace<Transform2D>(e, Transform2D{});
+                }
+            });
+
+            // -- Sprite2D --
+            t.push_back({
+                "Sprite2D",
+                /*required*/ false,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks& cb, json& out) -> bool {
+                    if (!reg.has<SpriteComponent2D>(e)) return false;
+                    out = toJsonSprite(reg.get<SpriteComponent2D>(e), cb);
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   Scene2D&, const SceneLoadCallbacks& cb,
+                   const json& j, std::string* outError) -> bool {
+                    SpriteComponent2D s{};
+                    std::string err;
+                    if (!fromJsonSprite(j, s, cb, &err)) {
+                        if (outError) *outError = err;
+                        return false;
+                    }
+                    reg.emplace<SpriteComponent2D>(e, s);
+                    return true;
+                },
+                nullptr
+            });
+
+            // -- Collider2D --
+            t.push_back({
+                "Collider2D",
+                /*required*/ false,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks&, json& out) -> bool {
+                    if (!reg.has<HBE::ECS::Collider2D>(e)) return false;
+                    out = toJsonCollider(reg.get<HBE::ECS::Collider2D>(e));
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   Scene2D&, const SceneLoadCallbacks&,
+                   const json& j, std::string*) -> bool {
+                    HBE::ECS::Collider2D c{};
+                    fromJsonCollider(j, c);
+                    reg.emplace<HBE::ECS::Collider2D>(e, c);
+                    return true;
+                },
+                nullptr
+            });
+
+            // -- RigidBody2D --
+            t.push_back({
+                "RigidBody2D",
+                /*required*/ false,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks&, json& out) -> bool {
+                    if (!reg.has<HBE::ECS::RigidBody2D>(e)) return false;
+                    out = toJsonRigidBody(reg.get<HBE::ECS::RigidBody2D>(e));
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   Scene2D&, const SceneLoadCallbacks&,
+                   const json& j, std::string*) -> bool {
+                    HBE::ECS::RigidBody2D r{};
+                    fromJsonRigidBody(j, r);
+                    reg.emplace<HBE::ECS::RigidBody2D>(e, r);
+                    return true;
+                },
+                nullptr
+            });
+
+            // -- Script (name-only; onUpdate re-bound by callback) --
+            t.push_back({
+                "Script",
+                /*required*/ false,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks&, json& out) -> bool {
+                    if (!reg.has<HBE::ECS::Script>(e)) return false;
+                    const auto& sc = reg.get<HBE::ECS::Script>(e);
+                    out = json{ {"name", sc.name} };
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   Scene2D& scene, const SceneLoadCallbacks& cb,
+                   const json& j, std::string*) -> bool {
+                    const std::string scriptName = j.value("name", "");
+                    if (scriptName.empty()) return true;
+
+                    // Always attach the component so its .name round-trips even
+                    // when no binder is available.
+                    HBE::ECS::Script sc{};
+                    sc.name = scriptName;
+                    reg.emplace<HBE::ECS::Script>(e, sc);
+
+                    if (!cb.bindScript) {
+                        HBE::Core::LogWarn(
+                            "SceneSerializer: no bindScript callback; script '"
+                            + scriptName + "' will not run.");
+                        return true;
+                    }
+
+                    const bool recognized = cb.bindScript(e, scriptName, scene);
+                    if (!recognized) {
+                        HBE::Core::LogWarn(
+                            "SceneSerializer: script '" + scriptName +
+                            "' is not recognized by the current binder. Component "
+                            "attached with name preserved; onUpdate is null.");
+                    }
+                    return true;
+                },
+                nullptr
+                });
+
+            // -- Animator (preset name + sheet key + current state) --
+            t.push_back({
+                "Animator",
+                /*required*/ false,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks& cb, json& out) -> bool {
+                    if (!reg.has<AnimationComponent2D>(e)) return false;
+                    const auto& anim = reg.get<AnimationComponent2D>(e);
+
+                    json aj;
+                    if (reg.has<HBE::ECS::AnimatorPresetComponent>(e)) {
+                        aj["preset"] = reg
+                            .get<HBE::ECS::AnimatorPresetComponent>(e).preset;
+                    }
+                    else {
+                        aj["preset"] = "";
+                        HBE::Core::LogWarn("SceneSerializer: entity has "
+                            "AnimationComponent2D but no "
+                            "AnimatorPresetComponent - state machine will "
+                            "not survive reload.");
+                    }
+                    aj["sheet"] = "";
+                    if (cb.sheetKey && anim.sm.sheet)
+                        aj["sheet"] = cb.sheetKey(anim.sm.sheet);
+                    aj["state"] = anim.sm.getState().empty() ? "Idle"
+                        : anim.sm.getState();
+
+                    out = aj;
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   Scene2D& scene, const SceneLoadCallbacks& cb,
+                   const json& j, std::string*) -> bool {
+                    const std::string preset = j.value("preset", "");
+                    const std::string sheetKey = j.value("sheet", "");
+                    const std::string state = j.value("state", "Idle");
+
+                    if (sheetKey.empty()) return true;
+                    if (!cb.sheet) return true;
+
+                    const auto* sheet = cb.sheet(sheetKey);
+                    if (!sheet) {
+                        HBE::Core::LogWarn(
+                            "SceneSerializer: unknown sheet key '" +
+                            sheetKey + "'; animator skipped.");
+                        return true;
+                    }
+
+                    auto* sm = scene.addSpriteAnimator(e, sheet);
+                    if (!sm) return true;
+
+                    if (!preset.empty() && cb.buildAnimatorPreset) {
+                        cb.buildAnimatorPreset(e, preset, *sm, scene);
+                        sm->setState(state, true);
+
+                        HBE::ECS::AnimatorPresetComponent ap{};
+                        ap.preset = preset;
+                        reg.emplace<HBE::ECS::AnimatorPresetComponent>(e, ap);
+                    }
+                    else if (!preset.empty()) {
+                        HBE::Core::LogWarn(
+                            "SceneSerializer: no buildAnimatorPreset "
+                            "callback; preset '" + preset +
+                            "' will not be rebuilt.");
+                    }
+                    return true;
+                },
+                nullptr
+            });
+
+            return t;
+        }();
+        return table;
     }
 
     bool SceneSerializer::saveToFile(Scene2D& scene,
@@ -183,23 +453,25 @@ namespace HBE::Renderer {
         }
 
         json root;
-        root["version"] = 1;
-        // Store the tilemap reference as a LOGICAL path so scene files remain
-        // portable across machines and don't embed developer-specific
-        // absolute paths. GameLayer already hands us a logical path since
-        // step 3 of item 13; strip is a no-op on a clean path and defensive
-        // against accidental absolute inputs.
-        // TODO(item 13 cleanup): once no scenes on disk carry an "assets/"
-        // prefix, StripLegacyAssetsPrefix can be removed in item 14.
-        root["tilemap"] = HBE::Core::AssetPaths::StripLegacyAssetsPrefix(tilemapPath);
+        root["version"] = SceneSerializer::kSceneVersion;
+        // Scene files store the tilemap as a LOGICAL path - callers
+        // (GameLayer) are responsible for keeping it unrooted. Item 14
+        // doc 08 deleted the StripLegacyAssetsPrefix safety-net that
+        // used to scrub authored paths at save time.
+        root["tilemap"] = tilemapPath;
 
         json ents = json::array();
 
-        // Driver: entities that have Transform2D
+        const auto& schemas = componentSchemas();
+
         for (auto e : reg.view<Transform2D>()) {
 
-            // Ensure stable ID exists
+            // Doc 01 guarantee: IDComponent already exists.
             if (!reg.has<HBE::ECS::IDComponent>(e)) {
+                HBE::Core::LogWarn("SceneSerializer::saveToFile: entity created "
+                    "without going through Scene2D::createEntity � assigning "
+                    "a UUID now, but this entity will get a *new* UUID next "
+                    "session. Fix the call site.");
                 HBE::ECS::IDComponent id{};
                 id.uuid = HBE::Core::NewUUID32();
                 reg.emplace<HBE::ECS::IDComponent>(e, id);
@@ -209,56 +481,18 @@ namespace HBE::Renderer {
 
             json ej;
             ej["uuid"] = id.uuid;
+            ej["name"] = reg.has<HBE::ECS::TagComponent>(e)
+                ? reg.get<HBE::ECS::TagComponent>(e).tag
+                : (std::string("Entity_") + id.uuid.substr(0, 6));
 
-            // Tag
-            if (reg.has<HBE::ECS::TagComponent>(e)) {
-                ej["name"] = reg.get<HBE::ECS::TagComponent>(e).tag;
-            }
-            else {
-                ej["name"] = std::string("Entity_") + id.uuid.substr(0, 6);
-            }
-
-            json comps;
-
-            // Transform
-            comps["Transform2D"] = toJsonTransform(reg.get<Transform2D>(e));
-
-            // Sprite
-            if (reg.has<SpriteComponent2D>(e)) {
-                comps["Sprite2D"] = toJsonSprite(reg.get<SpriteComponent2D>(e), cb);
-            }
-
-            // Collider
-            if (reg.has<HBE::ECS::Collider2D>(e)) {
-                comps["Collider2D"] = toJsonCollider(reg.get<HBE::ECS::Collider2D>(e));
-            }
-
-            // Rigidbody
-            if (reg.has<HBE::ECS::RigidBody2D>(e)) {
-                comps["RigidBody2D"] = toJsonRigidBody(reg.get<HBE::ECS::RigidBody2D>(e));
-            }
-
-            // Script name only
-            if (reg.has<HBE::ECS::Script>(e)) {
-                const auto& sc = reg.get<HBE::ECS::Script>(e);
-                comps["Script"] = json{ {"name", sc.name} };
-            }
-
-            // Animator preset (we cannot serialize the whole state machine safely yet)
-            if (reg.has<AnimationComponent2D>(e)) {
-                json aj;
-                aj["preset"] = "UNSPECIFIED";
-                aj["sheet"] = "";
-                aj["state"] = "Idle";
-
-                // If caller can reverse-map sheet pointer -> key
-                const auto& anim = reg.get<AnimationComponent2D>(e);
-                if (cb.sheetKey && anim.sm.sheet) {
-                    aj["sheet"] = cb.sheetKey(anim.sm.sheet);
+            // Dispatch to every registered schema. Save order = registration
+            // order = deterministic JSON output.
+            json comps = json::object();
+            for (const auto& s : schemas) {
+                json cj;
+                if (s.save(e, reg, cb, cj)) {
+                    comps[s.key] = std::move(cj);
                 }
-
-                // If you store preset name somewhere later, swap this out.
-                comps["Animator"] = aj;
             }
 
             ej["components"] = comps;
@@ -298,21 +532,26 @@ namespace HBE::Renderer {
             return false;
         }
 
-        const int version = root.value("version", 1);
-        (void)version;
+        const int fileVersion = root.value("version", 1);
+        if (fileVersion > SceneSerializer::kSceneVersion) {
+            // Future file, current engine. Refuse rather than guess.
+            if (outError) *outError = "SceneSerializer: scene file version " +
+                std::to_string(fileVersion) + " is newer than engine (" +
+                std::to_string(SceneSerializer::kSceneVersion) +
+                "). Update the engine or downgrade the file.";
+            return false;
+        }
+        if (fileVersion < SceneSerializer::kSceneVersion) {
+            HBE::Core::LogInfo("SceneSerializer: migrating scene from v" +
+                std::to_string(fileVersion) + " to v" +
+                std::to_string(SceneSerializer::kSceneVersion));
+            migrateToLatest(root);
+        }
 
         if (outTilemapPath) {
-            // Normalize to a LOGICAL path (no leading "assets/", no absolute
-            // prefix). GameLayer stores m_tileMapPath as a logical path and
-            // re-resolves at every use site; storing an absolute path here
-            // would break the moment the game is moved to a different asset
-            // root.
-            // TODO(item 13 cleanup): drop StripLegacyAssetsPrefix in item 14
-            // once no scenes on disk carry an "assets/" prefix.
-            const std::string embedded = root.value("tilemap", "");
-            *outTilemapPath = embedded.empty()
-                ? std::string{}
-                : HBE::Core::AssetPaths::StripLegacyAssetsPrefix(embedded);
+            // Scene files store LOGICAL tilemap paths. GameLayer resolves
+            // them through AssetPaths on every use.
+            *outTilemapPath = root.value("tilemap", "");
         }
 
         if (!root.contains("entities") || !root["entities"].is_array()) {
@@ -324,91 +563,61 @@ namespace HBE::Renderer {
         scene.clear();
         auto& reg = scene.registry();
 
-        // Create entities
+        const auto& schemas = componentSchemas();
+
+        // Build a name -> schema lookup for O(1) dispatch on load.
+        std::unordered_map<std::string, const SceneComponentSchema*> byName;
+        byName.reserve(schemas.size());
+        for (const auto& s : schemas) byName.emplace(s.key, &s);
+
         for (auto& ej : root["entities"]) {
             const std::string uuid = ej.value("uuid", "");
             const std::string name = ej.value("name", "");
-
             const json comps = ej.value("components", json::object());
 
             HBE::ECS::Entity e = reg.create();
 
-            // ID + Tag
-            {
-                HBE::ECS::IDComponent id{};
-                id.uuid = uuid.empty() ? HBE::Core::NewUUID32() : uuid;
-                reg.emplace<HBE::ECS::IDComponent>(e, id);
+            const std::string chosenUuid = uuid.empty()
+                ? HBE::Core::NewUUID32() : uuid;
+            const std::string chosenTag = name.empty()
+                ? std::string("Entity_") + chosenUuid.substr(0, 6) : name;
 
-                HBE::ECS::TagComponent tag{};
-                tag.tag = name.empty() ? std::string("Entity_") + id.uuid.substr(0, 6) : name;
-                reg.emplace<HBE::ECS::TagComponent>(e, tag);
+            if (!scene.tryAdoptId(e, chosenUuid, chosenTag)) {
+                HBE::Core::LogWarn("SceneSerializer::loadFromFile: skipping "
+                    "entity '" + chosenTag + "' - UUID " + chosenUuid +
+                    " already taken.");
+                reg.destroy(e);
+                continue;
             }
 
-            // Transform
-            if (comps.contains("Transform2D")) {
-                Transform2D t{};
-                fromJsonTransform(comps["Transform2D"], t);
-                reg.emplace<Transform2D>(e, t);
-            }
-            else {
-                // every entity needs Transform2D
-                reg.emplace<Transform2D>(e, Transform2D{});
-            }
+            // First pass: dispatch every JSON component key.
+            for (auto it = comps.begin(); it != comps.end(); ++it) {
+                const std::string& key = it.key();
+                auto lookup = byName.find(key);
+                if (lookup == byName.end()) {
+                    HBE::Core::LogWarn(
+                        "SceneSerializer: unknown component '" + key +
+                        "' on entity '" + chosenTag + "' - ignored.");
+                    continue;
+                }
 
-            // Sprite
-            if (comps.contains("Sprite2D")) {
-                SpriteComponent2D s{};
                 std::string err;
-                if (!fromJsonSprite(comps["Sprite2D"], s, cb, &err)) {
+                if (!lookup->second->load(e, reg, scene, cb, it.value(), &err)) {
                     if (outError) *outError = err;
                     return false;
                 }
-                reg.emplace<SpriteComponent2D>(e, s);
             }
 
-            // Collider
-            if (comps.contains("Collider2D")) {
-                HBE::ECS::Collider2D c{};
-                fromJsonCollider(comps["Collider2D"], c);
-                reg.emplace<HBE::ECS::Collider2D>(e, c);
-            }
-
-            // Rigidbody
-            if (comps.contains("RigidBody2D")) {
-                HBE::ECS::RigidBody2D r{};
-                fromJsonRigidBody(comps["RigidBody2D"], r);
-                reg.emplace<HBE::ECS::RigidBody2D>(e, r);
-            }
-
-            // Script (name -> bindScript callback sets lambdas)
-            if (comps.contains("Script")) {
-                const std::string scriptName = comps["Script"].value("name", "");
-                if (!scriptName.empty()) {
-                    HBE::ECS::Script sc{};
-                    sc.name = scriptName;
-                    reg.emplace<HBE::ECS::Script>(e, sc);
-
-                    if (cb.bindScript) {
-                        cb.bindScript(e, scriptName, scene);
-                    }
-                }
-            }
-
-            // Animator preset (preset + sheet key)
-            if (comps.contains("Animator")) {
-                const std::string preset = comps["Animator"].value("preset", "");
-                const std::string sheetKey = comps["Animator"].value("sheet", "");
-                const std::string state = comps["Animator"].value("state", "Idle");
-
-                if (cb.sheet && cb.buildAnimatorPreset && !sheetKey.empty() && !preset.empty()) {
-                    const auto* sheet = cb.sheet(sheetKey);
-                    if (sheet) {
-                        auto* sm = scene.addSpriteAnimator(e, sheet);
-                        if (sm) {
-                            cb.buildAnimatorPreset(e, preset, *sm, scene);
-                            sm->setState(state, true);
-                        }
-                    }
+            // Second pass: install defaults for required components that were
+            // missing from the JSON.
+            for (const auto& s : schemas) {
+                if (!s.required) continue;
+                if (comps.contains(s.key)) continue;
+                if (s.installDefault) {
+                    HBE::Core::LogWarn("SceneSerializer: entity '" + chosenTag +
+                        "' missing required component '" + s.key +
+                        "' - using default.");
+                    s.installDefault(e, reg);
                 }
             }
         }

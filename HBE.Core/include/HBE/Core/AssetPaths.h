@@ -33,7 +33,5 @@ namespace HBE::Core {
 		std::string ResolveRelativeTo(std::string_view baseFilePath, std::string_view embeddedRelPath);
 
 		bool Exists(std::string_view logicalRelPath);
-
-		std::string StripLegacyAssetsPrefix(std::string_view path);
 	}
 }

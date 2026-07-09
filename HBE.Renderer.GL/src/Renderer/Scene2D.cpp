@@ -1,6 +1,9 @@
+#include "HBE/Core/Log.h"
+#include "HBE/Core/UUID.h"
+#include "HBE/ECS/RuntimeComponents.h"
+
 #include "HBE/Renderer/Scene2D.h"
 #include "HBE/Renderer/Renderer2D.h"
-#include "HBE/Core/Log.h"
 #include "HBE/Renderer/Material.h"
 #include "HBE/Renderer/Mesh.h"
 
@@ -19,20 +22,32 @@ namespace HBE::Renderer {
 
     using HBE::Core::LogError;
 
-    EntityID Scene2D::createEntity(const RenderItem& templateItem) {
-        EntityID e = m_reg.create();
+    EntityID Scene2D::createEntity() {
+        auto e = m_reg.create();
 
-        // Transform component
+        HBE::ECS::IDComponent id{};
+        id.uuid = HBE::Core::NewUUID32();
+        m_reg.emplace<HBE::ECS::IDComponent>(e, id);
+        m_idToEntity.emplace(id.uuid, e);
+
+        HBE::ECS::TagComponent tag{};
+        tag.tag = std::string("Entity_") + id.uuid.substr(0, 6);
+        m_reg.emplace<HBE::ECS::TagComponent>(e, tag);
+
+        return e;
+    }
+
+    EntityID Scene2D::createEntity(const RenderItem& templateItem) {
+        EntityID e = createEntity();
+
         m_reg.emplace<Transform2D>(e, templateItem.transform);
 
-        // Sprite component
         SpriteComponent2D sprite;
         sprite.mesh = templateItem.mesh;
         sprite.material = templateItem.material;
         sprite.layer = templateItem.layer;
         sprite.sortKey = templateItem.sortKey;
 
-        // Copy UVs, but guard against "all zeros" (invisible) defaults.
         const float u0 = templateItem.uvRect[0];
         const float v0 = templateItem.uvRect[1];
         const float u1 = templateItem.uvRect[2];
@@ -41,7 +56,6 @@ namespace HBE::Renderer {
         const bool allZero = (u0 == 0.0f && v0 == 0.0f && u1 == 0.0f && v1 == 0.0f);
 
         if (allZero) {
-            // Default to full texture until an animation applies proper atlas UVs.
             sprite.uvRect[0] = 0.0f; sprite.uvRect[1] = 0.0f;
             sprite.uvRect[2] = 1.0f; sprite.uvRect[3] = 1.0f;
         }
@@ -55,6 +69,29 @@ namespace HBE::Renderer {
         return e;
     }
 
+    bool Scene2D::tryAdoptId(EntityID e, const std::string& uuid, const std::string& tag) {
+        if (auto it = m_idToEntity.find(uuid); it != m_idToEntity.end() && it->second != e) {
+            HBE::Core::LogWarn("Scene2D: duplicate UUID '" + uuid + "' - new entity will be skipped by caller.");
+            return false;
+        }
+
+        if (m_reg.has<HBE::ECS::IDComponent>(e)) {
+            const auto& old = m_reg.get<HBE::ECS::IDComponent>(e);
+            m_idToEntity.erase(old.uuid);
+        }
+
+        HBE::ECS::IDComponent id{};
+        id.uuid = uuid;
+        m_reg.emplace<HBE::ECS::IDComponent>(e, id);
+        m_idToEntity[uuid] = e;
+
+        HBE::ECS::TagComponent t{};
+        t.tag = tag;
+        m_reg.emplace<HBE::ECS::TagComponent>(e, t);
+
+        return true;
+    }
+
     Transform2D* Scene2D::getTransform(EntityID id) {
         if (!m_reg.valid(id)) return nullptr;
         if (!m_reg.has<Transform2D>(id)) return nullptr;
@@ -66,8 +103,7 @@ namespace HBE::Renderer {
 
         auto& anim = m_reg.emplace<AnimationComponent2D>(id);
         anim.sm.sheet = sheet;
-
-        // Force UV rect to something visible immediately (first apply after update)
+        
         return &anim.sm;
     }
 
@@ -88,15 +124,11 @@ namespace HBE::Renderer {
 
     static inline float applyDamping(float v, float damping, float dt) {
         if (damping <= 0.0f) return v;
-        // Exponential-ish decay that is stable for large dt
         const float k = 1.0f / (1.0f + damping * dt);
         return v * k;
     }
 
     void Scene2D::update(float dt, const SpriteAnimationStateMachine::EventCallback& onAnimEvent) {
-        // -----------------------------
-        // 1) Script system
-        // -----------------------------
         for (auto e : m_reg.view<HBE::ECS::Script>()) {
             auto& sc = m_reg.get<HBE::ECS::Script>(e);
 
@@ -115,12 +147,8 @@ namespace HBE::Renderer {
             if (sc.onUpdate) sc.onUpdate(e, dt);
         }
 
-        // -----------------------------
-        // 2) Physics + tile collision system (physics-lite)
-        // -----------------------------
         const bool canTileCollide = (m_tileMap != nullptr && m_collisionLayer != nullptr);
 
-        // Frame-level bookkeeping
         for (auto e : m_reg.view<HBE::ECS::RigidBody2D>()) {
             auto& rb = m_reg.get<HBE::ECS::RigidBody2D>(e);
             rb.grounded = false;
@@ -130,7 +158,6 @@ namespace HBE::Renderer {
             }
         }
 
-        // Sub-stepping (stability)
         int steps = 1;
         float stepDt = dt;
 
@@ -147,11 +174,9 @@ namespace HBE::Renderer {
 
                 if (rb.isStatic) continue;
 
-                // integrate acceleration -> velocity
                 rb.velX += rb.accelX * stepDt;
                 rb.velY += rb.accelY * stepDt;
 
-                // gravity
                 if (rb.useGravity) {
                     rb.velY += m_physics.gravityY * rb.gravityScale * stepDt;
                 }
@@ -168,7 +193,6 @@ namespace HBE::Renderer {
                 if (canTileCollide && hasCollider) {
                     auto& col = m_reg.get<HBE::ECS::Collider2D>(e);
 
-                    // build center-based AABB in world space
                     HBE::Renderer::AABB box;
                     box.w = col.halfW * 2.0f;
                     box.h = col.halfH * 2.0f;
@@ -179,7 +203,6 @@ namespace HBE::Renderer {
 
                     const bool allowOneWay = rb.enableOneWay && (rb.oneWayDisableTimer <= 0.0f);
 
-                    // Move with collision resolution (updates box + velocities)
                     HBE::Renderer::MoveResult2D res =
                         HBE::Renderer::TileCollision::moveAndCollideEx(
                             *m_tileMap, *m_collisionLayer,
@@ -192,25 +215,19 @@ namespace HBE::Renderer {
 
                     if (res.grounded) rb.grounded = true;
 
-                    // write back resolved position (undo collider offset)
                     tr.posX = box.cx - col.offsetX;
                     tr.posY = box.cy - col.offsetY;
                 }
                 else {
-                    // simple Euler integrate
                     tr.posX += rb.velX * stepDt;
                     tr.posY += rb.velY * stepDt;
                 }
             }
         }
-
-        // -----------------------------
-        // 2.5) Entity-vs-Entity collision (AABB vs AABB)
-        // Dynamic colliders push out of static colliders.
-        // -----------------------------
+                
         struct WorldAABB {
-            float cx, cy; // center
-            float hx, hy; // half extents
+            float cx, cy;
+            float hx, hy;
         };
 
         auto makeAABB = [&](HBE::ECS::Entity e) -> WorldAABB {
@@ -234,7 +251,6 @@ namespace HBE::Renderer {
             const float py = (a.hy + b.hy) - std::fabs(dy);
             if (py <= 0.0f) return false;
 
-            // Choose minimum penetration axis
             if (px < py) {
                 outDx = (dx < 0.0f) ? +px : -px;
                 outDy = 0.0f;
@@ -246,7 +262,6 @@ namespace HBE::Renderer {
             return true;
             };
 
-        // Build a list of static colliders
         std::vector<HBE::ECS::Entity> statics;
         statics.reserve(128);
 
@@ -262,14 +277,12 @@ namespace HBE::Renderer {
             }
         }
 
-        // Dynamic bodies collide against statics
         for (auto e : m_reg.view<Transform2D, HBE::ECS::RigidBody2D, HBE::ECS::Collider2D>()) {
             auto& tr = m_reg.get<Transform2D>(e);
             auto& rb = m_reg.get<HBE::ECS::RigidBody2D>(e);
 
             if (rb.isStatic) continue;
 
-            // Iteratively resolve (a couple passes helps prevent tunneling when overlapping)
             for (int pass = 0; pass < 2; ++pass) {
                 bool anyResolved = false;
 
@@ -296,16 +309,12 @@ namespace HBE::Renderer {
             }
         }
 
-        // -----------------------------
-        // 3) Animation system (UV updates)
-        // -----------------------------
         for (auto e : m_reg.view<AnimationComponent2D, SpriteComponent2D>()) {
             auto& anim = m_reg.get<AnimationComponent2D>(e).sm;
             auto& spr = m_reg.get<SpriteComponent2D>(e);
 
             anim.update(dt, onAnimEvent);
 
-            // Apply animation to UVs.
             RenderItem tmp;
             tmp.mesh = spr.mesh;
             tmp.material = spr.material;
@@ -322,7 +331,6 @@ namespace HBE::Renderer {
     void Scene2D::render(Renderer2D& renderer) {
         const Camera2D* cam = renderer.activeCamera();
 
-        // Camera view rect in world space
         float viewL = -1e9f, viewR = 1e9f, viewB = -1e9f, viewT = 1e9f;
         bool canCull = false;
 
@@ -343,7 +351,6 @@ namespace HBE::Renderer {
             auto& tr = m_reg.get<Transform2D>(e);
             auto& spr = m_reg.get<SpriteComponent2D>(e);
 
-            // simple world-space AABB for sprite culling
             if (canCull) {
                 const float pad = 0.25f * std::max(std::fabs(tr.scaleX), std::fabs(tr.scaleY));
 
@@ -369,10 +376,10 @@ namespace HBE::Renderer {
     }
 
     void Scene2D::clear() {
-        // simplest: reset registry and runtime-only pointers
         m_reg = HBE::ECS::Registry{};
         m_tileMap = nullptr;
         m_collisionLayer = nullptr;
+        m_idToEntity.clear();
     }
 
 } // namespace HBE::Renderer

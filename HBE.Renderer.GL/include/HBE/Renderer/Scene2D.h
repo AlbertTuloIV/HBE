@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
+#include <unordered_map>
 
 #include "HBE/ECS/Registry.h"
 #include "HBE/Renderer/RenderItem.h"
@@ -36,6 +38,7 @@ namespace HBE::Renderer {
         Scene2D() = default;
 
         // Create an entity by copying a template RenderItem
+        EntityID createEntity();
         EntityID createEntity(const RenderItem& templateItem);
 
         // Access
@@ -73,6 +76,7 @@ namespace HBE::Renderer {
         const HBE::ECS::Registry& registry() const { return m_reg; }
 
         bool cullingEnabled() const { return m_cullingEnabled; }
+        bool tryAdoptId(EntityID e, const std::string& uuid, const std::string& tag);
 
     private:
         HBE::ECS::Registry m_reg;
@@ -84,6 +88,8 @@ namespace HBE::Renderer {
         const TileMapLayer* m_collisionLayer = nullptr;
 
         bool m_cullingEnabled = true;
+
+        std::unordered_map<std::string, HBE::ECS::Entity> m_idToEntity;
     };
 
 } // namespace HBE::Renderer
