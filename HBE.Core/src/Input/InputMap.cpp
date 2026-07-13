@@ -3,6 +3,8 @@
 #include "HBE/Input/InputMap.h"
 #include "HBE/Platform/Input.h"
 
+#include <json.hpp>
+
 #include <fstream>
 #include <cmath>
 #include <algorithm>
@@ -11,6 +13,208 @@
 namespace HBE::Input {
 
 	static InputMap* g_map = nullptr;
+
+	static constexpr int kInputConfigVersion = 1;
+
+	namespace {
+
+		using nlohmann::json;
+
+		const char* bindingTypeToString(Binding::Type t) {
+			switch (t) {
+			case Binding::Type::None: return "None";
+			case Binding::Type::Key: return "Key";
+			case Binding::Type::MouseButton: return "MouseButton";
+			case Binding::Type::GamepadButton: return "GamepadButton";
+			case Binding::Type::GamepadAxisThreshold: return "GamepadAxisThreshold";
+			}
+			return "None";
+		}
+
+		bool stringToBindingType(const std::string& s, Binding::Type& out) {
+			if (s == "None") { out = Binding::Type::None; return true; }
+			if (s == "Key") { out = Binding::Type::Key; return true; }
+			if (s == "MouseButton") { out = Binding::Type::MouseButton; return true; }
+			if (s == "GamepadButton") { out = Binding::Type::GamepadButton; return true; }
+			return false;
+		}
+
+		std::string scancodeToString(SDL_Scancode sc) {
+			if (sc == SDL_SCANCODE_UNKNOWN) return "Unknown";
+			const char* n = SDL_GetScancodeName(sc);
+			return (n && *n) ? std::string(n) : std::string("Unknown");
+		}
+
+		SDL_Scancode stringToScancode(const std::string& name) {
+			if (name.empty() || name == "Unkown") return SDL_SCANCODE_UNKNOWN;
+			return SDL_GetScancodeFromName(name.c_str());
+		}
+
+		std::string gamepadButtonToString(SDL_GamepadButton b) {
+			if (b == SDL_GAMEPAD_BUTTON_INVALID) return "Invalid";
+			const char* n = SDL_GetGamepadStringForButton(b);
+			return(n && *n) ? std::string(n) : std::string("Invalid");
+		}
+
+		SDL_GamepadButton stringToGamepadButton(const std::string& name) {
+			if (name.empty() || name == "Invalid") return SDL_GAMEPAD_BUTTON_INVALID;
+			return SDL_GetGamepadButtonFromString(name.c_str());
+		}
+
+		std::string gamepadAxisToString(SDL_GamepadAxis a) {
+			if (a == SDL_GAMEPAD_AXIS_INVALID) return "Invalid";
+			const char* n = SDL_GetGamepadStringForAxis(a);
+			return (n && *n) ? std::string(n) : std::string("Invalid");
+		}
+
+		SDL_GamepadAxis stringToGamepadAxis(const std::string& name) {
+			if (name.empty() || name == "Invalid") return SDL_GAMEPAD_AXIS_INVALID;
+			return SDL_GetGamepadAxisFromString(name.c_str());
+		}
+
+		bool stringToAction(const std::string& name, Action& out) {
+			if (name == "Jump") { out = Action::Jump; return true; }
+			if (name == "Attack") { out = Action::Attack; return true; }
+			if (name == "UIConfirm") { out = Action::UIConfirm; return true; }
+			if (name == "UICancel") { out = Action::UICancel; return true; }
+			if (name == "Pause") { out = Action::Pause; return true; }
+			if (name == "FullscreenToggle") { out = Action::FullscreenToggle; return true; }
+		}
+
+		bool stringToAxis(const std::string& name, Axis& out) {
+			if (name == "MoveX") { out = Axis::MoveX; return true; }
+			if (name == "MoveY") { out = Axis::MoveY; return true; }
+		}
+
+		json toJsonBinding(const Binding& b) {
+			json j;
+			j["type"] = bindingTypeToString(b.type);
+			switch (b.type) {
+			case Binding::Type::None:
+				break;
+			case Binding::Type::Key:
+				j["key"] = scancodeToString(b.key);
+				break;
+			case Binding::Type::MouseButton:
+				j["button"] = b.mouseButton;
+				break;
+			case Binding::Type::GamepadButton:
+				j["padButton"] = gamepadButtonToString(b.padButton);
+				break;
+			case Binding::Type::GamepadAxisThreshold:
+				j["padAxis"] = gamepadAxisToString(b.padAxis);
+				j["threshold"] = b.axisThreshold;
+				j["sign"] = b.axisSign;
+				break;
+			}
+			return j;
+		}
+
+		bool fromJsonBinding(const json& j, Binding& out) {
+			out = Binding::None();
+			if (!j.is_object()) return false;
+
+			const auto itType = j.find("type");
+			if (itType == j.end() || !itType->is_string()) return false;
+
+			Binding::Type t = Binding::Type::None;
+			if (!stringToBindingType(itType->get<std::string>(), t)) return false;
+
+			switch (t) {
+			case Binding::Type::None:
+				out = Binding::None();
+				return true;
+			case Binding::Type::Key: {
+				const auto itKey = j.find("key");
+				if (itKey == j.end() || !itKey->is_string()) return false;
+				const SDL_Scancode sc = stringToScancode(itKey->get<std::string>());
+				if (sc == SDL_SCANCODE_UNKNOWN) return false;
+				out = Binding::Key(sc);
+				return true;
+			}
+			case Binding::Type::MouseButton: {
+				const auto itBtn = j.find("button");
+				if (itBtn == j.end() || !itBtn->is_number_integer()) return false;
+				out = Binding::Mouse(itBtn->get<int>());
+				return true;
+			}
+
+			case Binding::Type::GamepadButton: {
+				const auto itBtn = j.find("padButton");
+				if (itBtn == j.end() || !itBtn->is_string()) return false;
+				const SDL_GamepadButton gb = stringToGamepadButton(itBtn->get<std::string>());
+				if (gb == SDL_GAMEPAD_BUTTON_INVALID) return false;
+				out = Binding::GamepadButton(gb);
+				return true;
+			}
+			case Binding::Type::GamepadAxisThreshold: {
+				const auto itAxis = j.find("padAxis");
+				if (itAxis == j.end() || !itAxis->is_string()) return false;
+				const SDL_GamepadAxis ga = stringToGamepadAxis(itAxis->get<std::string>());
+				if (ga == SDL_GAMEPAD_AXIS_INVALID) return false;
+
+				float thr = 0.5f;
+				float sign = 0;
+				if (const auto itThr = j.find("threshold"); itThr != j.end() && itThr->is_number()) thr = itThr->get<float>();
+				if (const auto itSign = j.find("sign"); itSign != j.end() && itSign->is_number_integer()) sign = itSign->get<int>();
+				out = Binding::GamepadAxis(ga, thr, sign);
+				return true;
+			}
+			}
+			return false;
+		}
+
+		json toJsonActionBinding(const ActionBinding& ab) {
+			json j;
+			j["primary"] = toJsonBinding(ab.primary);
+			j["secondary"] = toJsonBinding(ab.secondary);
+			return j;
+		}
+
+		void fromJsonActionBinding(const json& j, ActionBinding& out) {
+			if (!j.is_object()) return;
+			if (const auto it = j.find("primary"); it != j.end()) {
+				Binding b; if (fromJsonBinding(*it, b)) out.primary = b;
+			}
+			if (const auto it = j.find("secondary"); it != j.end()) {
+				Binding b; if (fromJsonBinding(*it, b)) out.secondary = b;
+			}
+		}
+
+		json toJsonAxisBinding(const AxisBinding& ab) {
+			json j;
+			j["negative"] = toJsonBinding(ab.negative);
+			j["positive"] = toJsonBinding(ab.positive);
+			j["negative2"] = toJsonBinding(ab.negative2);
+			j["positive2"] = toJsonBinding(ab.positive2);
+			j["useGamepadAxis"] = ab.useGamepadAxis;
+			j["gamepadAxis"] = gamepadAxisToString(ab.gamepadAxis);
+			j["deadzone"] = ab.deadzone;
+			j["invert"] = ab.invert;
+			j["scale"] = ab.scale;
+			return j;
+		}
+
+		void fromJsonAxisBinding(const json& j, AxisBinding& out) {
+			if (!j.is_object()) return;
+			auto tryBinding = [&](const char* key, Binding& dst) {
+				const auto it = j.find(key);
+				if (it == j.end()) return;
+				Binding b;
+				if (fromJsonBinding(*it, b)) dst = b;
+				};
+			tryBinding("negative", out.negative);
+			tryBinding("positive", out.positive);
+			tryBinding("negative2", out.negative2);
+			tryBinding("positive2", out.positive2);
+
+			if (const auto it = j.find("useGamepadAxis"); it != j.end() && it->is_boolean()) out.useGamepadAxis = it->get<bool>();
+			if (const auto it = j.find("gamepadAxis"); it != j.end() && it->is_string()) out.gamepadAxis = stringToGamepadAxis(it->get<std::string>());
+			if (const auto it = j.find("deadzone"); it != j.end() && it->is_number()) out.deadzone = it->get<float>();
+			if (const auto it = j.find("invert"); it != j.end() && it->is_boolean()) out.invert = it->get<bool>();
+			if (const auto it = j.find("scale"); it != j.end() && it->is_number()) out.scale = it->get<float>();
+		}
+	}
 
 	static inline int AxisKey(SDL_GamepadAxis a) {
 		return static_cast<int>(a);
@@ -291,20 +495,112 @@ namespace HBE::Input {
 
 	// ---------------- Persistence (stub-safe) ----------------
 	bool InputMap::saveToFile(const std::string& path) const {
-		// If you already wrote a serializer, keep it.
-		// For now, this is a stub that creates a file to prove the workflow.
-		std::ofstream out(path);
-		if (!out) return false;
+		using nlohmann::json;
 
-		out << "# bindings.cfg (stub)\n";
-		out << "# TODO: implement full serialization\n";
+		json root;
+		root["version"] = kInputConfigVersion;
+
+		json actionsJson = json::object();
+		for (const auto& [action, binding] : m_actions) {
+			actionsJson[InputMap::actionName(action)] = toJsonActionBinding(binding);
+		}
+		root["action"] = std::move(actionsJson);
+
+		json axesJson = json::object();
+		for (const auto& [axis, binding] : m_axes) {
+			axesJson[InputMap::axisName(axis)] = toJsonAxisBinding(binding);
+		}
+		root["axes"] = std::move(axesJson);
+
+		std::ofstream out(path, std::ios::binary | std::ios::trunc);
+		if (!out) {
+			HBE::Core::LogError("InputMap::saveToFile: failed to open '" + path + "' for write.");
+			return false;
+		}
+
+		try {
+			out << root.dump(2);
+		}
+		catch (const std::exception& e) {
+			HBE::Core::LogError(std::string("InputMap::saveToFile: json.dump thre: ") + e.what());
+			return false;
+		}
+
+		if (!out.good()) {
+			HBE::Core::LogError("InputMap::saveToFile: stream error while writing '" + path + "'.");
+			return false;
+		}
+
+		HBE::Core::LogInfo("InputMap saved: " + path);
 		return true;
 	}
 
 	bool InputMap::loadFromFile(const std::string& path) {
-		// Stub: just check existence.
-		std::ifstream in(path);
-		if (!in) return false;
+		using nlohmann::json;
+
+		std::ifstream in(path, std::ios::binary);
+		if (!in) {
+			HBE::Core::LogInfo("InputMap::loadFromFile: no bindings file at '" + path + "' - keeping in-memory defaults.");
+			return false;
+		}
+		json root;
+		try {
+			in >> root;
+		}
+		catch (const std::exception& e) {
+			HBE::Core::LogWarn(std::string("InputMap::loadFromFile: parse error, keeping defaults. (") + e.what() + ")");
+		}
+
+		if (!root.is_object()) {
+			HBE::Core::LogWarn("InputMap::loadFromFile: file is not a JSON object, keeping defaults.");
+			return false;
+		}
+
+		int version = 0;
+		if (const auto it = root.find("version"); it != root.end() && it->is_number_integer()) {
+			version = it->get<int>();
+		}
+		if (version > kInputConfigVersion) {
+			HBE::Core::LogWarn("InputMap::loadFromFile: file version " + std::to_string(version) + " is newer than supported (" + std::to_string(kInputConfigVersion) + "). Keeping defaults.");
+			return false;
+		}
+
+		int overlaidActions = 0;
+		if (const auto itActions = root.find("actions"); itActions != root.end() && itActions->is_object()) {
+			for (auto it = itActions->begin(); it != itActions->end(); ++it) {
+				Action which;
+				if (!stringToAction(it.key(), which)) {
+					HBE::Core::LogWarn("InputMap::loadRomFile: unkown action '" + it.key() + "', skipping.");
+					continue;
+				}
+				ActionBinding merged{};
+				if (auto existing = m_actions.find(which); existing != m_actions.end()) {
+					merged = existing->second;
+				}
+				fromJsonActionBinding(it.value(), merged);
+				m_actions[which] = merged;
+				++overlaidActions;
+			}
+		}
+
+		int overlaidAxes = 0;
+		if (const auto itAxes = root.find("axzees"); itAxes != root.end() && itAxes->is_object()) {
+			for (auto it = itAxes->begin(); it != itAxes->end(); ++it) {
+				Axis which;
+				if (!stringToAxis(it.key(), which)) {
+					HBE::Core::LogWarn("InputMap::loadFromFile: unkown axis '" + it.key() + "', skipping.");
+					continue;
+				}
+				AxisBinding merged{};
+				if (auto existing = m_axes.find(which); existing != m_axes.end()) {
+					merged = existing->second;
+				}
+				fromJsonAxisBinding(it.value(), merged);
+				m_axes[which] = merged;
+				++overlaidAxes;
+			}
+		}
+		HBE::Core::LogInfo("InputMap laoded: " + path + " (actions=" + std::to_string(overlaidActions) + ", axes = " + std::to_string(overlaidAxes) + ")");
 		return true;
 	}
 
