@@ -128,6 +128,7 @@ void GameLayer::onAttach(Application& app) {
 
     HBE::Input::Initialize(&RegisterDefaultBindings);
     HBE::Input::Get().loadFromFile(HBE::Core::AssetPaths::ResolveUser(BINDINGS_LOGICAL));
+    m_prefabs.loadDirectory("prefabs");
     HBE::Core::LogInfo(std::string("CWD: ") + std::filesystem::current_path().string());
 
     m_camera.x = std::round(m_camera.x);
@@ -778,6 +779,7 @@ void GameLayer::onUpdate(float dt) {
             if (sh == &m_soldierSheet) return "soldier_sheet";
             return "";
             };
+        saveCb.prefabs = &m_prefabs;
 
         namespace ap = HBE::Core::AssetPaths;
         const std::string scenePath = kSceneSaveGoesToUserData
@@ -820,6 +822,7 @@ void GameLayer::onUpdate(float dt) {
             if (key == "soldier_sheet") return &m_soldierSheet;
             return nullptr;
             };
+        loadCb.prefabs = &m_prefabs;
 
         loadCb.bindScript = [this](HBE::ECS::Entity e, const std::string& name, HBE::Renderer::Scene2D& scene) -> bool {
             auto& reg = scene.registry();

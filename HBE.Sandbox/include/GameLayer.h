@@ -18,6 +18,7 @@
 #include "HBE/Renderer/UI/UIContext.h"
 #include "HBE/Renderer/ParticleSystem.h"
 #include "HBE/Renderer/PostProcessStack.h"
+#include "HBE/Renderer/PrefabLibrary.h"
 
 #include <array>
 #include <unordered_map>
@@ -88,6 +89,7 @@ private:
 
 	HBE::Renderer::Camera2D m_camera{};
 	HBE::Renderer::Scene2D m_scene{};
+	HBE::Renderer::PrefabLibrary m_prefabs{};
 
 	HBE::Renderer::TileMap m_tileMap{};
 	HBE::Renderer::TileMapRenderer m_tileRenderer{};
