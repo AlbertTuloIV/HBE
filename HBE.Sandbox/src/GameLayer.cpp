@@ -49,7 +49,7 @@ namespace {
     constexpr float GOBLIN_BODY_H_PX = 14.0f;
     constexpr float GOBLIN_BODY_Y_OFFSET_PX = +0.5f;
 
-    constexpr const char* BINDINGS_LOGICAL = "bindings.cfg";
+    constexpr const char* BINDINGS_LOGICAL = "bindings.json";
     constexpr const char* SCENE_LOGICAL = "scenes/sandbox.scene.json";
 
     static void SetAnimatorPreset(HBE::ECS::Registry& reg, HBE::ECS::Entity e, const std::string& presetName) {
@@ -1591,5 +1591,6 @@ void GameLayer::hotReloadUITheme() {
 }
 
 void GameLayer::onDetach() {
+    HBE::Input::Get().saveToFile(HBE::Core::AssetPaths::ResolveUser(BINDINGS_LOGICAL));
     m_particles.shutdown();
 }
