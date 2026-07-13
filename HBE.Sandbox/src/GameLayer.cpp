@@ -129,6 +129,7 @@ void GameLayer::onAttach(Application& app) {
     HBE::Input::Initialize(&RegisterDefaultBindings);
     HBE::Input::Get().loadFromFile(HBE::Core::AssetPaths::ResolveUser(BINDINGS_LOGICAL));
     m_prefabs.loadDirectory("prefabs");
+    registerScripts();
     HBE::Core::LogInfo(std::string("CWD: ") + std::filesystem::current_path().string());
 
     m_camera.x = std::round(m_camera.x);
@@ -401,72 +402,10 @@ void GameLayer::onAttach(Application& app) {
         if (!reg.has<HBE::ECS::RigidBody2D>(m_soldierEntity))
             reg.emplace<HBE::ECS::RigidBody2D>(m_soldierEntity, rb);
 
-        HBE::ECS::Script sc{};
-        sc.name = "PlayerController";
-        sc.onUpdate = [this](HBE::ECS::Entity e, float dt) {
-            if (m_console.isOpen()) {
-                auto& r = m_scene.registry();
-                if (r.has<HBE::ECS::RigidBody2D>(e)) {
-                    auto& body = r.get<HBE::ECS::RigidBody2D>(e);
-                    body.accelX = 0.0f;
-                    body.accelY = 0.0f;
-                    body.velX = 0.0f;
-                }
-                return;
-            }
-            auto& r = m_scene.registry();
-            if (!r.has<HBE::ECS::RigidBody2D>(e) || !r.has<Transform2D>(e)) return;
-
-            auto& body = r.get<HBE::ECS::RigidBody2D>(e);
-
-            const float inputX = HBE::Input::AxisValue(HBE::Input::Axis::MoveX);
-            const float inputY = HBE::Input::AxisValue(HBE::Input::Axis::MoveY);
-
-            const bool Down = (inputY > 0.5f);
-            const bool JumpPressed = HBE::Input::ActionPressed(HBE::Input::Action::Jump);
-            const bool AttackPressed = HBE::Input::ActionPressed(HBE::Input::Action::Attack);
-
-            const float moveSpeed = 520.0f;
-            const float accelGround = 5200.0f;
-            const float accelAir = 3200.0f;
-            const float friction = 6200.0f;
-            const float jumpVel = 780.0f;
-
-            body.accelY = 0.0f;
-
-            const float targetVX = inputX * moveSpeed;
-            const float ax = body.grounded ? accelGround : accelAir;
-
-            if (inputX != 0.0f) {
-                body.velX = Approach(body.velX, targetVX, ax * dt);
-            }
-            else if (body.grounded) {
-                body.velX = Approach(body.velX, 0.0f, friction * dt);
-            }
-
-            if (JumpPressed && body.grounded && !Down) {
-                body.velY = jumpVel;
-                body.grounded = false;
-            }
-
-            if (JumpPressed && Down) {
-                body.oneWayDisableTimer = 0.20f;
-                body.velY = std::min(body.velY, -120.0f);
-                body.grounded = false;
-            }
-
-            if (auto* sAnim = m_scene.getSpriteAnimator(e)) {
-                const bool moving = (std::fabs(body.velX) > 5.0f);
-                sAnim->setBool("moving", moving);
-
-                if (AttackPressed) {
-                    sAnim->trigger("attack");
-                }
-            }
-            };
-
-        if (!reg.has<HBE::ECS::Script>(m_soldierEntity))
+        if (!reg.has<HBE::ECS::Script>(m_soldierEntity)) {
+            HBE::ECS::Script sc = m_scripts.create("PlayerController", m_soldierEntity, m_scene);
             reg.emplace<HBE::ECS::Script>(m_soldierEntity, std::move(sc));
+        }
     }
 
     if (reg.valid(m_goblinEntity)) {
@@ -488,20 +427,10 @@ void GameLayer::onAttach(Application& app) {
         if (!reg.has<HBE::ECS::RigidBody2D>(m_goblinEntity))
             reg.emplace<HBE::ECS::RigidBody2D>(m_goblinEntity, rb);
 
-        HBE::ECS::Script sc{};
-        sc.name = "GoblinTest";
-        sc.onUpdate = [this](HBE::ECS::Entity e, float dt) {
-            (void)dt;
-            if (auto* gAnim = m_scene.getSpriteAnimator(e)) {
-                gAnim->setBool("moving", false);
-                if (HBE::Input::ActionPressed(HBE::Input::Action::UIConfirm)) {
-                    gAnim->trigger("attack");
-                }
-            }
-            };
-
-        if (!reg.has<HBE::ECS::Script>(m_goblinEntity))
+        if (!reg.has<HBE::ECS::Script>(m_goblinEntity)) {
+            HBE::ECS::Script sc = m_scripts.create("GoblinTest", m_goblinEntity, m_scene);
             reg.emplace<HBE::ECS::Script>(m_goblinEntity, std::move(sc));
+        }
     }
 
     LogInfo("GameLayer attached.");
@@ -822,80 +751,9 @@ void GameLayer::onUpdate(float dt) {
             if (key == "soldier_sheet") return &m_soldierSheet;
             return nullptr;
             };
+
         loadCb.prefabs = &m_prefabs;
-
-        loadCb.bindScript = [this](HBE::ECS::Entity e, const std::string& name, HBE::Renderer::Scene2D& scene) -> bool {
-            auto& reg = scene.registry();
-            if (!reg.has<HBE::ECS::Script>(e)) return false;
-
-            auto& sc = reg.get<HBE::ECS::Script>(e);
-            sc.name = name;
-
-            if (name == "PlayerController") {
-                sc.onUpdate = [this](HBE::ECS::Entity ent, float dt) {
-                    auto& r = m_scene.registry();
-                    if (!r.has<HBE::ECS::RigidBody2D>(ent) || !r.has<Transform2D>(ent)) return;
-
-                    auto& body = r.get<HBE::ECS::RigidBody2D>(ent);
-
-                    const float inputX = HBE::Input::AxisValue(HBE::Input::Axis::MoveX);
-                    const float inputY = HBE::Input::AxisValue(HBE::Input::Axis::MoveY);
-
-                    const bool Down = (inputY > 0.5f);
-                    const bool JumpPressed = HBE::Input::ActionPressed(HBE::Input::Action::Jump);
-                    const bool AttackPressed = HBE::Input::ActionPressed(HBE::Input::Action::Attack);
-
-                    const float moveSpeed = 520.0f;
-                    const float accelGround = 5200.0f;
-                    const float accelAir = 3200.0f;
-                    const float friction = 6200.0f;
-                    const float jumpVel = 780.0f;
-
-                    body.accelY = 0.0f;
-
-                    const float targetVX = inputX * moveSpeed;
-                    const float ax = body.grounded ? accelGround : accelAir;
-
-                    if (inputX != 0.0f) {
-                        body.velX = Approach(body.velX, targetVX, ax * dt);
-                    }
-                    else if (body.grounded) {
-                        body.velX = Approach(body.velX, 0.0f, friction * dt);
-                    }
-
-                    if (JumpPressed && body.grounded && !Down) {
-                        body.velY = jumpVel;
-                        body.grounded = false;
-                    }
-
-                    if (JumpPressed && Down) {
-                        body.oneWayDisableTimer = 0.20f;
-                        body.velY = std::min(body.velY, -120.0f);
-                        body.grounded = false;
-                    }
-
-                    if (auto* sAnim = m_scene.getSpriteAnimator(ent)) {
-                        const bool moving = (std::fabs(body.velX) > 5.0f);
-                        sAnim->setBool("moving", moving);
-                        if (AttackPressed) sAnim->trigger("attack");
-                    }
-                    };
-                return true;
-            }
-            else if (name == "GoblinTest") {
-                sc.onUpdate = [this](HBE::ECS::Entity ent, float dt) {
-                    (void)dt;
-                    if (auto* gAnim = m_scene.getSpriteAnimator(ent)) {
-                        gAnim->setBool("moving", false);
-                        if (HBE::Input::ActionPressed(HBE::Input::Action::UIConfirm)) {
-                            gAnim->trigger("attack");
-                        }
-                    }
-                    };
-                return true;
-            }
-            return false;
-            };
+        loadCb.scripts = &m_scripts;
 
         loadCb.buildAnimatorPreset = [this](HBE::ECS::Entity e,
             const std::string& preset,
@@ -1596,4 +1454,92 @@ void GameLayer::hotReloadUITheme() {
 void GameLayer::onDetach() {
     HBE::Input::Get().saveToFile(HBE::Core::AssetPaths::ResolveUser(BINDINGS_LOGICAL));
     m_particles.shutdown();
+}
+
+void GameLayer::registerScripts() {
+    using HBE::ECS::Entity;
+    using HBE::ECS::Script;
+    using HBE::Renderer::Scene2D;
+
+    m_scripts.registerScript("PlayerController",
+        [this](Entity, Scene2D&) -> Script {
+            Script sc{};
+            sc.name = "PlayerController";
+            sc.onUpdate = [this](Entity e, float dt) {
+                if (m_console.isOpen()) {
+                    auto& r = m_scene.registry();
+                    if (r.has<HBE::ECS::RigidBody2D>(e)) {
+                        auto& body = r.get<HBE::ECS::RigidBody2D>(e);
+                        body.accelX = 0.0f;
+                        body.accelY = 0.0f;
+                        body.velX = 0.0f;
+                    }
+                    return;
+                }
+                auto& r = m_scene.registry();
+                if (!r.has<HBE::ECS::RigidBody2D>(e) || !r.has<Transform2D>(e)) return;
+
+                auto& body = r.get<HBE::ECS::RigidBody2D>(e);
+
+                const float inputX = HBE::Input::AxisValue(HBE::Input::Axis::MoveX);
+                const float inputY = HBE::Input::AxisValue(HBE::Input::Axis::MoveY);
+
+                const bool Down = (inputY > 0.5f);
+                const bool JumpPressed = HBE::Input::ActionPressed(HBE::Input::Action::Jump);
+                const bool AttackPressed = HBE::Input::ActionPressed(HBE::Input::Action::Attack);
+
+                const float moveSpeed = 520.0f;
+                const float accelGround = 5200.0f;
+                const float accelAir = 3200.0f;
+                const float friction = 6200.0f;
+                const float jumpVel = 780.0f;
+
+                body.accelY = 0.0f;
+
+                const float targetVX = inputX * moveSpeed;
+                const float ax = body.grounded ? accelGround : accelAir;
+
+                if (inputX != 0.0f) {
+                    body.velX = Approach(body.velX, targetVX, ax * dt);
+                }
+                else if (body.grounded) {
+                    body.velX = Approach(body.velX, 0.0f, friction * dt);
+                }
+                if (JumpPressed && body.grounded && !Down) {
+                    body.velY = jumpVel;
+                    body.grounded = false;
+                }
+
+                if (JumpPressed && body.grounded && !Down) {
+                    body.oneWayDisableTimer = 0.20f;
+                    body.velY = std::min(body.velY, -120.0f);
+                    body.grounded = false;
+                }
+                if (auto* sAnim = m_scene.getSpriteAnimator(e)) {
+                    const bool moving = (std::fabs(body.velX) > 5.0f);
+                    sAnim->setBool("moving", moving);
+                    if (AttackPressed) sAnim->trigger("attack");
+                }
+                };
+            return sc;
+        });
+
+    m_scripts.registerScript("GoblinTest",
+        [this](Entity, Scene2D&) -> Script {
+            Script sc{};
+            sc.name = "GoblinTest";
+            sc.onUpdate = [this](Entity e, float dt) {
+                (void)dt;
+                if (auto* gAnim = m_scene.getSpriteAnimator(e)) {
+                    gAnim->setBool("moving", false);
+                    if (HBE::Input::ActionPressed(HBE::Input::Action::UIConfirm)) {
+                        gAnim->trigger("attack");
+                    }
+                }
+                };
+            return sc;
+        });
+
+    HBE::Core::LogInfo("ScriptRegistry: registered "
+        + std::to_string(m_scripts.size()) + " scripts(s).");
 }

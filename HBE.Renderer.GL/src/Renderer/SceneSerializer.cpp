@@ -13,6 +13,7 @@
 #include "HBE/Renderer/Transform2D.h"
 #include "HBE/Renderer/Prefab.h"
 #include "HBE/Renderer/PrefabLibrary.h"
+#include "HBE/Renderer/ScriptRegistry.h"
 
 #include <fstream>
 #include <sstream>
@@ -335,24 +336,34 @@ namespace HBE::Renderer {
                    const json& j, std::string*) -> bool {
                     const std::string scriptName = j.value("name", "");
                     if (scriptName.empty()) return true;
+                    if (cb.scripts && cb.scripts->has(scriptName)) {
+                        HBE::ECS::Script sc = cb.scripts->create(scriptName, e, scene);
+                        // create() guarantees sc.name is set even if the
+                        // factory forgot; belt-and-braces:
+                        if (sc.name.empty()) sc.name = scriptName;
+                        reg.emplace<HBE::ECS::Script>(e, std::move(sc));
+                        return true;
+                    }
                     HBE::ECS::Script sc{};
                     sc.name = scriptName;
                     reg.emplace<HBE::ECS::Script>(e, sc);
 
-                    if (!cb.bindScript) {
-                        HBE::Core::LogWarn(
-                            "SceneSerializer: no bindScript callback; script '"
-                            + scriptName + "' will not run.");
+                    if (cb.bindScript) {
+                        const bool recognized = cb.bindScript(e, scriptName, scene);
+                        if (!recognized) {
+                            HBE::Core::LogWarn(
+                                "SceneSerializer: script '" + scriptName +
+                                "' is not recognized by the current binder. "
+                                "Component attached with name preserved; "
+                                "onUpdate is null.");
+                        }
                         return true;
                     }
 
-                    const bool recognized = cb.bindScript(e, scriptName, scene);
-                    if (!recognized) {
-                        HBE::Core::LogWarn(
-                            "SceneSerializer: script '" + scriptName +
-                            "' is not recognized by the current binder. Component "
-                            "attached with name preserved; onUpdate is null.");
-                    }
+                    HBE::Core::LogWarn(
+                        "SceneSerializer: no ScriptRegistry or bindScript "
+                        "callback provided; script '" + scriptName +
+                        "' will not run.");
                     return true;
                 },
                 nullptr

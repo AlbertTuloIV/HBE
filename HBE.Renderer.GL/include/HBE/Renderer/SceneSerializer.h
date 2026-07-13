@@ -10,6 +10,7 @@ namespace HBE::Renderer {
     class Mesh;
     class Material;
     class PrefabLibrary;
+    class ScriptRegistry;
 
     struct SceneSaveCallbacks {
         std::function<std::string(const Mesh*)> meshKey;
@@ -27,6 +28,7 @@ namespace HBE::Renderer {
         std::function<void(HBE::ECS::Entity e, const std::string& presetName, SpriteAnimationStateMachine& sm, Scene2D& scene)> buildAnimatorPreset;
 
         const PrefabLibrary* prefabs = nullptr;
+        const ScriptRegistry* scripts = nullptr;
     };
 
     class SceneSerializer {
