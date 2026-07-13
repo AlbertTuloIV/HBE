@@ -20,6 +20,7 @@
 #include "HBE/Renderer/PostProcessStack.h"
 #include "HBE/Renderer/PrefabLibrary.h"
 #include "HBE/Renderer/ScriptRegistry.h"
+#include "HBE/Renderer/AnimationPresetRegistry.h"
 
 #include <array>
 #include <unordered_map>
@@ -92,6 +93,7 @@ private:
 	HBE::Renderer::Scene2D m_scene{};
 	HBE::Renderer::PrefabLibrary m_prefabs{};
 	HBE::Renderer::ScriptRegistry m_scripts{};
+	HBE::Renderer::AnimationPresetRegistry m_animPresets{};
 
 	HBE::Renderer::TileMap m_tileMap{};
 	HBE::Renderer::TileMapRenderer m_tileRenderer{};
@@ -154,4 +156,5 @@ private:
 	void hotReloadUITheme();
 	
 	void registerScripts();
+	void registerAnimatorPresets();
 };

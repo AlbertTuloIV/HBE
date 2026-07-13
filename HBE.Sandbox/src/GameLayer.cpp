@@ -130,6 +130,7 @@ void GameLayer::onAttach(Application& app) {
     HBE::Input::Get().loadFromFile(HBE::Core::AssetPaths::ResolveUser(BINDINGS_LOGICAL));
     m_prefabs.loadDirectory("prefabs");
     registerScripts();
+    registerAnimatorPresets();
     HBE::Core::LogInfo(std::string("CWD: ") + std::filesystem::current_path().string());
 
     m_camera.x = std::round(m_camera.x);
@@ -597,48 +598,14 @@ void main() {
     m_soldierEntity = m_scene.createEntity(soldier);
 
     if (auto* gAnim = m_scene.addSpriteAnimator(m_goblinEntity, &m_goblinSheet)) {
-        gAnim->addClip({ "Idle",   0, 0, 6, 0.10f, true,  1.0f });
-        gAnim->addClip({ "Run",    1, 0, 6, 0.08f, true,  1.0f });
-        gAnim->addClip({ "Attack", 2, 0, 6, 0.07f, false, 1.0f });
-
-        gAnim->addEvent("Run", 1, "footstep");
-        gAnim->addEvent("Run", 4, "footstep");
-        gAnim->addEvent("Attack", 3, "hitframe");
-
-        gAnim->addState("Idle", "Idle");
-        gAnim->addState("Run", "Run");
-        gAnim->addState("Attack", "Attack");
-
-        gAnim->addTransitionTrigger("*", "Attack", "attack");
-        gAnim->addTransitionBool("Idle", "Run", "moving", true);
-        gAnim->addTransitionBool("Run", "Idle", "moving", false);
-        gAnim->addTransitionFinished("Attack", "Idle");
-
+        m_animPresets.build("GoblinAnimator", m_goblinEntity, *gAnim, m_scene);
         gAnim->setState("Idle", true);
-
         SetAnimatorPreset(m_scene.registry(), m_goblinEntity, "GoblinAnimator");
     }
 
     if (auto* sAnim = m_scene.addSpriteAnimator(m_soldierEntity, &m_soldierSheet)) {
-        sAnim->addClip({ "Idle",   0, 0, 6, 0.10f, true,  1.0f });
-        sAnim->addClip({ "Run",    1, 0, 8, 0.10f, true,  1.0f });
-        sAnim->addClip({ "Attack", 2, 0, 7, 0.07f, false, 1.0f });
-
-        sAnim->addEvent("Run", 2, "footstep");
-        sAnim->addEvent("Run", 6, "footstep");
-        sAnim->addEvent("Attack", 4, "hitframe");
-
-        sAnim->addState("Idle", "Idle");
-        sAnim->addState("Run", "Run");
-        sAnim->addState("Attack", "Attack");
-
-        sAnim->addTransitionTrigger("*", "Attack", "attack");
-        sAnim->addTransitionBool("Idle", "Run", "moving", true);
-        sAnim->addTransitionBool("Run", "Idle", "moving", false);
-        sAnim->addTransitionFinished("Attack", "Idle");
-
+        m_animPresets.build("SoldierAnimator", m_soldierEntity, *sAnim, m_scene);
         sAnim->setState("Idle", true);
-
         SetAnimatorPreset(m_scene.registry(), m_soldierEntity, "SoldierAnimator");
     }
 }
@@ -754,52 +721,7 @@ void GameLayer::onUpdate(float dt) {
 
         loadCb.prefabs = &m_prefabs;
         loadCb.scripts = &m_scripts;
-
-        loadCb.buildAnimatorPreset = [this](HBE::ECS::Entity e,
-            const std::string& preset,
-            HBE::Renderer::SpriteAnimationStateMachine& sm,
-            HBE::Renderer::Scene2D& scene)
-            {
-                (void)e; (void)scene;
-
-                if (preset == "GoblinAnimator") {
-                    sm.addClip({ "Idle",   0, 0, 6, 0.10f, true,  1.0f });
-                    sm.addClip({ "Run",    1, 0, 6, 0.08f, true,  1.0f });
-                    sm.addClip({ "Attack", 2, 0, 6, 0.07f, false, 1.0f });
-
-                    sm.addEvent("Run", 1, "footstep");
-                    sm.addEvent("Run", 4, "footstep");
-                    sm.addEvent("Attack", 3, "hitframe");
-
-                    sm.addState("Idle", "Idle");
-                    sm.addState("Run", "Run");
-                    sm.addState("Attack", "Attack");
-
-                    sm.addTransitionTrigger("*", "Attack", "attack");
-                    sm.addTransitionBool("Idle", "Run", "moving", true);
-                    sm.addTransitionBool("Run", "Idle", "moving", false);
-                    sm.addTransitionFinished("Attack", "Idle");
-                }
-
-                if (preset == "SoldierAnimator") {
-                    sm.addClip({ "Idle",   0, 0, 6, 0.10f, true,  1.0f });
-                    sm.addClip({ "Run",    1, 0, 8, 0.10f, true,  1.0f });
-                    sm.addClip({ "Attack", 2, 0, 7, 0.07f, false, 1.0f });
-
-                    sm.addEvent("Run", 2, "footstep");
-                    sm.addEvent("Run", 6, "footstep");
-                    sm.addEvent("Attack", 4, "hitframe");
-
-                    sm.addState("Idle", "Idle");
-                    sm.addState("Run", "Run");
-                    sm.addState("Attack", "Attack");
-
-                    sm.addTransitionTrigger("*", "Attack", "attack");
-                    sm.addTransitionBool("Idle", "Run", "moving", true);
-                    sm.addTransitionBool("Run", "Idle", "moving", false);
-                    sm.addTransitionFinished("Attack", "Idle");
-                }
-            };
+        loadCb.animators = &m_animPresets;
 
         namespace ap = HBE::Core::AssetPaths;
         std::string scenePath = ap::ResolveUser(SCENE_LOGICAL);
@@ -1542,4 +1464,53 @@ void GameLayer::registerScripts() {
 
     HBE::Core::LogInfo("ScriptRegistry: registered "
         + std::to_string(m_scripts.size()) + " scripts(s).");
+}
+
+void GameLayer::registerAnimatorPresets() {
+    using HBE::ECS::Entity;
+    using HBE::Renderer::Scene2D;
+    using HBE::Renderer::SpriteAnimationStateMachine;
+
+    m_animPresets.registerPreset("GoblinAnimator",
+        [](Entity, SpriteAnimationStateMachine& sm, Scene2D&) {
+            sm.addClip({ "Idle",   0, 0, 6, 0.10f, true,  1.0f });
+            sm.addClip({ "Run",    1, 0, 6, 0.08f, true,  1.0f });
+            sm.addClip({ "Attack", 2, 0, 6, 0.07f, false, 1.0f });
+
+            sm.addEvent("Run", 1, "footstep");
+            sm.addEvent("Run", 4, "footstep");
+            sm.addEvent("Attack", 3, "hitframe");
+
+            sm.addState("Idle", "Idle");
+            sm.addState("Run", "Run");
+            sm.addState("Attack", "Attack");
+
+            sm.addTransitionTrigger("*", "Attack", "attack");
+            sm.addTransitionBool("Idle", "Run", "moving", true);
+            sm.addTransitionBool("Run", "Idle", "moving", false);
+            sm.addTransitionFinished("Attack", "Idle");
+        });
+
+    m_animPresets.registerPreset("SoldierAnimator",
+        [](Entity, SpriteAnimationStateMachine& sm, Scene2D&) {
+            sm.addClip({ "Idle",   0, 0, 6, 0.10f, true,  1.0f });
+            sm.addClip({ "Run",    1, 0, 8, 0.10f, true,  1.0f });
+            sm.addClip({ "Attack", 2, 0, 7, 0.07f, false, 1.0f });
+
+            sm.addEvent("Run", 2, "footstep");
+            sm.addEvent("Run", 6, "footstep");
+            sm.addEvent("Attack", 4, "hitframe");
+
+            sm.addState("Idle", "Idle");
+            sm.addState("Run", "Run");
+            sm.addState("Attack", "Attack");
+
+            sm.addTransitionTrigger("*", "Attack", "attack");
+            sm.addTransitionBool("Idle", "Run", "moving", true);
+            sm.addTransitionBool("Run", "Idle", "moving", false);
+            sm.addTransitionFinished("Attack", "Idle");
+        });
+
+    HBE::Core::LogInfo("AnimationPresetRegistry: registered "
+        + std::to_string(m_animPresets.size()) + " preset(s).");
 }

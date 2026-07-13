@@ -14,6 +14,7 @@
 #include "HBE/Renderer/Prefab.h"
 #include "HBE/Renderer/PrefabLibrary.h"
 #include "HBE/Renderer/ScriptRegistry.h"
+#include "HBE/Renderer/AnimationPresetRegistry.h"
 
 #include <fstream>
 #include <sstream>
@@ -398,7 +399,7 @@ namespace HBE::Renderer {
                     out = aj;
                     return true;
                 },
-                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
                    Scene2D& scene, const SceneLoadCallbacks& cb,
                    const json& j, std::string*) -> bool {
                     const std::string preset = j.value("preset", "");
@@ -419,20 +420,32 @@ namespace HBE::Renderer {
                     auto* sm = scene.addSpriteAnimator(e, sheet);
                     if (!sm) return true;
 
-                    if (!preset.empty() && cb.buildAnimatorPreset) {
+                    if (preset.empty()) {
+                        return true;
+                    }
+                    if (cb.animators && cb.animators->has(preset)) {
+                        cb.animators->build(preset, e, *sm, scene);
+                        sm->setState(state, true);
+
+                        HBE::ECS::AnimatorPresetComponent ap{};
+                        ap.preset = preset;
+                        reg.emplace<HBE::ECS::AnimatorPresetComponent>(e, ap);
+                        return true;
+                    }
+                    if (cb.buildAnimatorPreset) {
                         cb.buildAnimatorPreset(e, preset, *sm, scene);
                         sm->setState(state, true);
 
                         HBE::ECS::AnimatorPresetComponent ap{};
                         ap.preset = preset;
                         reg.emplace<HBE::ECS::AnimatorPresetComponent>(e, ap);
+                        return true;
                     }
-                    else if (!preset.empty()) {
-                        HBE::Core::LogWarn(
-                            "SceneSerializer: no buildAnimatorPreset "
-                            "callback; preset '" + preset +
-                            "' will not be rebuilt.");
-                    }
+
+                    HBE::Core::LogWarn(
+                        "SceneSerializer: no AnimationPresetRegistry or "
+                        "buildAnimatorPreset callback; preset '" + preset +
+                        "' will not be rebuilt.");
                     return true;
                 },
                 nullptr
