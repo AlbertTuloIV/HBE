@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "name": "Goblin",
+  "tag": "Goblin",
+  "components": {
+    "Transform2D": {
+      "x": 0.0,
+      "y": 0.0,
+      "sx": 400.0,
+      "sy": 400.0,
+      "rot": 0.0
+    },
+    "Sprite2D": {
+      "layer": 100,
+      "material": "goblin_mat",
+      "mesh": "quad",
+      "sortOffsetY": 0.0,
+      "uvRect": [ 0.0, 0.8333333134651184, 0.125, 0.1666666716337204 ]
+    },
+    "Collider2D": {
+      "halfW": 20.0,
+      "halfH": 28.0,
+      "offsetX": 0.0,
+      "offsetY": 2.0,
+      "isTrigger": false
+    },
+    "RigidBody2D": {
+      "isStatic": true,
+      "useGravity": false,
+      "gravityScale": 1.0,
+      "linearDamping": 0.0,
+      "maxFallSpeed": 0.0,
+      "maxStepUp": 0.0,
+      "enableOneWay": true,
+      "enableSlopes": true
+    },
+    "Animator": {
+      "preset": "GoblinAnimator",
+      "sheet": "orc_sheet",
+      "state": "Idle"
+    },
+    "Script": {
+      "name": "GoblinTest"
+    }
+  }
+}

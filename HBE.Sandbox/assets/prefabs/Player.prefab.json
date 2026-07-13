@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "name": "Player",
+  "tag": "Player",
+  "components": {
+    "Transform2D": {
+      "x": 0.0,
+      "y": 0.0,
+      "sx": 400.0,
+      "sy": 400.0,
+      "rot": 0.0
+    },
+    "Sprite2D": {
+      "layer": 200,
+      "material": "soldier_mat",
+      "mesh": "quad",
+      "sortOffsetY": 0.0,
+      "uvRect": [ 0.0, 0.8571428656578064, 0.1111111119389534, 0.1428571492433548 ]
+    },
+    "Collider2D": {
+      "halfW": 16.0,
+      "halfH": 28.0,
+      "offsetX": 0.0,
+      "offsetY": 2.0,
+      "isTrigger": false
+    },
+    "RigidBody2D": {
+      "isStatic": false,
+      "useGravity": true,
+      "gravityScale": 1.0,
+      "linearDamping": 0.0,
+      "maxFallSpeed": -2200.0,
+      "maxStepUp": 22.399999618530273,
+      "enableOneWay": true,
+      "enableSlopes": true
+    },
+    "Animator": {
+      "preset": "SoldierAnimator",
+      "sheet": "soldier_sheet",
+      "state": "Idle"
+    },
+    "Script": {
+      "name": "PlayerController"
+    }
+  }
+}

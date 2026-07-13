@@ -4,13 +4,15 @@
 #include "HBE/Core/UUID.h"
 #include "HBE/Core/AssetPaths.h"
 
-#include "HBE/ECS/RuntimeComponents.h"
 #include "HBE/ECS/Components.h"
+#include "HBE/ECS/ESCSComponents2D.h"
+#include "HBE/ECS/RuntimeComponents.h"
 
 #include "HBE/Renderer/Mesh.h"
 #include "HBE/Renderer/Material.h"
 #include "HBE/Renderer/Transform2D.h"
-#include "HBE/ECS/ESCSComponents2D.h"
+#include "HBE/Renderer/Prefab.h"
+#include "HBE/Renderer/PrefabLibrary.h"
 
 #include <fstream>
 #include <sstream>
@@ -158,20 +160,6 @@ namespace HBE::Renderer {
         r.maxFallSpeed = j.value("maxFallSpeed", 0.0f);
     }
 
-    // ---------------------------------------------------------------------
-    // v1 -> v2 migration
-    // ---------------------------------------------------------------------
-    //
-    // The v1 -> v2 delta is purely subtractive: v2 files never carry
-    // runtime physics/sprite fields, and never carry a placeholder
-    // "preset": "UNSPECIFIED". The loader (docs 03/04) already ignores
-    // those fields at read time; migrateV1toV2 rewrites them in-place
-    // before dispatch so an in-memory json object matches what saveToFile
-    // would produce today.
-    //
-    // This is deliberately conservative - it does not touch fields the
-    // loader still respects, and it does not remove or rename any
-    // component key.
     static void migrateV1toV2(json& root) {
         if (!root.contains("entities") || !root["entities"].is_array()) return;
 
@@ -179,7 +167,6 @@ namespace HBE::Renderer {
             if (!ej.contains("components") || !ej["components"].is_object()) continue;
             json& comps = ej["components"];
 
-            // RigidBody2D: strip runtime fields.
             if (comps.contains("RigidBody2D") && comps["RigidBody2D"].is_object()) {
                 for (const char* key : {"velX", "velY", "accelX", "accelY",
                                         "grounded", "oneWayDisableTimer"}) {
@@ -187,14 +174,10 @@ namespace HBE::Renderer {
                 }
             }
 
-            // Sprite2D: strip sortKey.
             if (comps.contains("Sprite2D") && comps["Sprite2D"].is_object()) {
                 comps["Sprite2D"].erase("sortKey");
             }
 
-            // Animator: replace UNSPECIFIED placeholder with empty string.
-            // Loader treats empty preset as "no rebuild"; caller must
-            // stamp a real preset (doc 02) before the next save.
             if (comps.contains("Animator") && comps["Animator"].is_object()) {
                 if (comps["Animator"].value("preset", "") == "UNSPECIFIED") {
                     comps["Animator"]["preset"] = "";
@@ -205,18 +188,15 @@ namespace HBE::Renderer {
         root["version"] = 2;
     }
 
-    // Dispatch: apply every migrator that fires below the current version.
-    // For now there's only one hop, but this shape supports future ones
-    // without touching the caller.
+    static void migrateV2toV3(json& root) {
+        root["version"] = 3;
+    }
+
     static void migrateToLatest(json& root) {
         const int version = root.value("version", 1);
         if (version < 2) migrateV1toV2(root);
-        // Future: if (version < 3) migrateV2toV3(root);
+        if (version < 3) migrateV2toV3(root);
     }
-
-    // ---------------------------------------------------------------------
-    // Component dispatch table
-    // ---------------------------------------------------------------------
 
     struct SceneComponentSchema {
         std::string key;
@@ -231,10 +211,27 @@ namespace HBE::Renderer {
         static const std::vector<SceneComponentSchema> table = [] {
             std::vector<SceneComponentSchema> t;
 
+            // -- PrefabRef (name-only; instance provenance) --
+            t.push_back({
+                "__prefab_ref__",
+                false,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks&, json&) -> bool {
+                        (void)e; (void)reg;
+                        return false;
+                    },
+                    [](HBE::ECS::Entity, HBE::ECS::Registry&,
+                       Scene2D&, const SceneLoadCallbacks&,
+                       const json&, std::string*) -> bool {
+                            return true;
+                        },
+                        nullptr
+                });
+
             // -- Transform2D (required) --
             t.push_back({
                 "Transform2D",
-                /*required*/ true,
+                true,
                 [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
                    const SceneSaveCallbacks&, json& out) -> bool {
                     if (!reg.has<Transform2D>(e)) return false;
@@ -258,7 +255,7 @@ namespace HBE::Renderer {
             // -- Sprite2D --
             t.push_back({
                 "Sprite2D",
-                /*required*/ false,
+                false,
                 [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
                    const SceneSaveCallbacks& cb, json& out) -> bool {
                     if (!reg.has<SpriteComponent2D>(e)) return false;
@@ -283,7 +280,7 @@ namespace HBE::Renderer {
             // -- Collider2D --
             t.push_back({
                 "Collider2D",
-                /*required*/ false,
+                false,
                 [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
                    const SceneSaveCallbacks&, json& out) -> bool {
                     if (!reg.has<HBE::ECS::Collider2D>(e)) return false;
@@ -304,7 +301,7 @@ namespace HBE::Renderer {
             // -- RigidBody2D --
             t.push_back({
                 "RigidBody2D",
-                /*required*/ false,
+                false,
                 [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
                    const SceneSaveCallbacks&, json& out) -> bool {
                     if (!reg.has<HBE::ECS::RigidBody2D>(e)) return false;
@@ -325,7 +322,7 @@ namespace HBE::Renderer {
             // -- Script (name-only; onUpdate re-bound by callback) --
             t.push_back({
                 "Script",
-                /*required*/ false,
+                false,
                 [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
                    const SceneSaveCallbacks&, json& out) -> bool {
                     if (!reg.has<HBE::ECS::Script>(e)) return false;
@@ -338,9 +335,6 @@ namespace HBE::Renderer {
                    const json& j, std::string*) -> bool {
                     const std::string scriptName = j.value("name", "");
                     if (scriptName.empty()) return true;
-
-                    // Always attach the component so its .name round-trips even
-                    // when no binder is available.
                     HBE::ECS::Script sc{};
                     sc.name = scriptName;
                     reg.emplace<HBE::ECS::Script>(e, sc);
@@ -364,10 +358,9 @@ namespace HBE::Renderer {
                 nullptr
                 });
 
-            // -- Animator (preset name + sheet key + current state) --
             t.push_back({
                 "Animator",
-                /*required*/ false,
+                false,
                 [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
                    const SceneSaveCallbacks& cb, json& out) -> bool {
                     if (!reg.has<AnimationComponent2D>(e)) return false;
@@ -454,10 +447,6 @@ namespace HBE::Renderer {
 
         json root;
         root["version"] = SceneSerializer::kSceneVersion;
-        // Scene files store the tilemap as a LOGICAL path - callers
-        // (GameLayer) are responsible for keeping it unrooted. Item 14
-        // doc 08 deleted the StripLegacyAssetsPrefix safety-net that
-        // used to scrub authored paths at save time.
         root["tilemap"] = tilemapPath;
 
         json ents = json::array();
@@ -466,7 +455,6 @@ namespace HBE::Renderer {
 
         for (auto e : reg.view<Transform2D>()) {
 
-            // Doc 01 guarantee: IDComponent already exists.
             if (!reg.has<HBE::ECS::IDComponent>(e)) {
                 HBE::Core::LogWarn("SceneSerializer::saveToFile: entity created "
                     "without going through Scene2D::createEntity � assigning "
@@ -485,14 +473,39 @@ namespace HBE::Renderer {
                 ? reg.get<HBE::ECS::TagComponent>(e).tag
                 : (std::string("Entity_") + id.uuid.substr(0, 6));
 
-            // Dispatch to every registered schema. Save order = registration
-            // order = deterministic JSON output.
+            const PrefabDefinition* prefabDef = nullptr;
+            if (cb.prefabs && reg.has<PrefabRefComponent>(e)) {
+                const auto& ref = reg.get<PrefabRefComponent>(e);
+                if (!ref.name.empty()) {
+                    prefabDef = cb.prefabs->get(ref.name);
+                    if (prefabDef) {
+                        ej["prefab"] = ref.name;
+                    }
+                    else {
+                        HBE::Core::LogWarn(
+                            "SceneSerializer::saveToFile: entity '" +
+                            ej["name"].get<std::string>() +
+                            "' references prefab '" + ref.name +
+                            "' but the library has no such name; writing "
+                            "fully inline.");
+                    }
+                }
+            }
             json comps = json::object();
             for (const auto& s : schemas) {
+                if (s.key.rfind("__", 0) == 0) continue;
+
                 json cj;
-                if (s.save(e, reg, cb, cj)) {
-                    comps[s.key] = std::move(cj);
+                if (!s.save(e, reg, cb, cj)) continue;
+
+                if (prefabDef) {
+                    const auto& base = prefabDef->components;
+                    const auto baseIt = base.find(s.key);
+                    if (baseIt != base.end() && *baseIt == cj) {
+                        continue;
+                    }
                 }
+                comps[s.key] = std::move(cj);
             }
 
             ej["components"] = comps;
@@ -534,7 +547,6 @@ namespace HBE::Renderer {
 
         const int fileVersion = root.value("version", 1);
         if (fileVersion > SceneSerializer::kSceneVersion) {
-            // Future file, current engine. Refuse rather than guess.
             if (outError) *outError = "SceneSerializer: scene file version " +
                 std::to_string(fileVersion) + " is newer than engine (" +
                 std::to_string(SceneSerializer::kSceneVersion) +
@@ -549,8 +561,6 @@ namespace HBE::Renderer {
         }
 
         if (outTilemapPath) {
-            // Scene files store LOGICAL tilemap paths. GameLayer resolves
-            // them through AssetPaths on every use.
             *outTilemapPath = root.value("tilemap", "");
         }
 
@@ -559,28 +569,59 @@ namespace HBE::Renderer {
             return false;
         }
 
-        // Clear current scene
         scene.clear();
         auto& reg = scene.registry();
 
         const auto& schemas = componentSchemas();
 
-        // Build a name -> schema lookup for O(1) dispatch on load.
         std::unordered_map<std::string, const SceneComponentSchema*> byName;
         byName.reserve(schemas.size());
         for (const auto& s : schemas) byName.emplace(s.key, &s);
 
         for (auto& ej : root["entities"]) {
-            const std::string uuid = ej.value("uuid", "");
-            const std::string name = ej.value("name", "");
-            const json comps = ej.value("components", json::object());
+            const std::string uuid       = ej.value("uuid", "");
+            const std::string name       = ej.value("name", "");
+            const std::string prefabName = ej.value("prefab", "");
+            const json overrides         = ej.value("components", json::object());
 
             HBE::ECS::Entity e = reg.create();
 
+            json comps = json::object();
+            const PrefabDefinition* prefabDef = nullptr;
+
+            if (!prefabName.empty()) {
+                if (cb.prefabs) {
+                    prefabDef = cb.prefabs->get(prefabName);
+                }
+                if (prefabDef) {
+                    comps = prefabDef->components;   // deep copy
+                }
+                else {
+                    HBE::Core::LogWarn(
+                        "SceneSerializer::loadFromFile: entity '" +
+                        (name.empty() ? uuid : name) +
+                        "' references prefab '" + prefabName +
+                        "' but " +
+                        (cb.prefabs ? std::string("the library has no such name.")
+                                    : std::string("no prefab library was provided.")) +
+                        " Falling back to scene-only components.");
+                }
+            }
+
+            if (prefabDef) {
+                comps.merge_patch(overrides);
+            }
+            else {
+                comps = overrides;
+            }
+
             const std::string chosenUuid = uuid.empty()
                 ? HBE::Core::NewUUID32() : uuid;
-            const std::string chosenTag = name.empty()
-                ? std::string("Entity_") + chosenUuid.substr(0, 6) : name;
+
+            std::string chosenTag;
+            if (!name.empty())                              chosenTag = name;
+            else if (prefabDef && !prefabDef->tag.empty())  chosenTag = prefabDef->tag;
+            else chosenTag = std::string("Entity_") + chosenUuid.substr(0, 6);
 
             if (!scene.tryAdoptId(e, chosenUuid, chosenTag)) {
                 HBE::Core::LogWarn("SceneSerializer::loadFromFile: skipping "
@@ -590,7 +631,10 @@ namespace HBE::Renderer {
                 continue;
             }
 
-            // First pass: dispatch every JSON component key.
+            if (prefabDef) {
+                reg.emplace<PrefabRefComponent>(e, PrefabRefComponent{ prefabName });
+            }
+
             for (auto it = comps.begin(); it != comps.end(); ++it) {
                 const std::string& key = it.key();
                 auto lookup = byName.find(key);
@@ -608,8 +652,6 @@ namespace HBE::Renderer {
                 }
             }
 
-            // Second pass: install defaults for required components that were
-            // missing from the JSON.
             for (const auto& s : schemas) {
                 if (!s.required) continue;
                 if (comps.contains(s.key)) continue;
