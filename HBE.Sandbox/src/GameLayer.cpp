@@ -20,6 +20,7 @@
 #include "HBE/Renderer/PostProcessStack.h"
 
 #include "HBE/Renderer/SceneSerializer.h"
+#include "HBE/Renderer/Prefab.h"r
 #include "HBE/ECS/RuntimeComponents.h"
 #include "HBE/ECS/Components.h"
 
@@ -118,6 +119,39 @@ namespace {
 
     static bool KeyPressed(SDL_Scancode sc) {
         return HBE::Platform::Input::IsKeyPressed(sc);
+    }
+
+    static const char* kEntityTagPresets[] = {
+        "Entity",
+        "Prop",
+        "Trigger",
+        "Enemy",
+        "Pickup",
+        "Torch",
+        "Marker",
+        "Player",
+        "Goblin",
+    };
+    static constexpr int kEntityTagPresetsCount = sizeof(kEntityTagPresets) / sizeof(kEntityTagPresets[0]);
+
+    // Item 20: build a placeholder Sprite2D for "Add Component -> Sprite2D".
+    // Uses whatever the sandbox already has wired up so the new sprite is
+    // instantly visible. Passing pointers keeps this header-free.
+    static HBE::Renderer::SpriteComponent2D MakeDefaultSprite(
+        HBE::Renderer::Mesh* quadMesh,
+        HBE::Renderer::Material* fallbackMat)
+    {
+        HBE::Renderer::SpriteComponent2D s{};
+        s.mesh = quadMesh;
+        s.material = fallbackMat;
+        s.layer = 200;
+        s.sortKey = 0.0f;
+        s.sortOffsetY = 0.0f;
+        s.uvRect[0] = 0.0f;
+        s.uvRect[1] = 0.0f;
+        s.uvRect[2] = 1.0f;
+        s.uvRect[3] = 1.0f;
+        return s;
     }
 }
 
@@ -682,45 +716,7 @@ void GameLayer::onUpdate(float dt) {
     }
 
     if (KeyPressed(SDL_SCANCODE_F5)) {
-        std::string err;
-
-        HBE::Renderer::SceneSaveCallbacks saveCb{};
-        saveCb.meshKey = [this](const HBE::Renderer::Mesh* m) -> std::string {
-            if (m == m_quadMesh) return "quad";
-            return "";
-            };
-        saveCb.materialKey = [this](const HBE::Renderer::Material* mat) -> std::string {
-            if (mat == &m_goblinMaterial) return "goblin_mat";
-            if (mat == &m_soldierMaterial) return "soldier_mat";
-            return "";
-            };
-        saveCb.sheetKey = [this](const HBE::Renderer::SpriteRenderer2D::SpriteSheetHandle* sh) -> std::string {
-            if (sh == &m_goblinSheet) return "orc_sheet";
-            if (sh == &m_soldierSheet) return "soldier_sheet";
-            return "";
-            };
-        saveCb.prefabs = &m_prefabs;
-
-        namespace ap = HBE::Core::AssetPaths;
-        const std::string scenePath = kSceneSaveGoesToUserData
-            ? ap::ResolveUser(SCENE_LOGICAL)
-            : ap::Resolve(SCENE_LOGICAL);
-
-        if (kSceneSaveGoesToUserData) {
-            std::error_code ec;
-            std::filesystem::create_directories(
-                std::filesystem::path(scenePath).parent_path(), ec);
-        }
-
-        const bool ok = HBE::Renderer::SceneSerializer::saveToFile(
-            m_scene, scenePath, saveCb, m_tileMapPath, &err);
-
-        if (!ok) {
-            LogError("Scene save FAILED: " + err);
-        }
-        else {
-            LogInfo("Scene saved: " + scenePath);
-        }
+        saveSceneNow();
     }
 
     if (KeyPressed(SDL_SCANCODE_F9)) {
@@ -798,67 +794,12 @@ void GameLayer::onUpdate(float dt) {
         if (allowRestart) {
             HBE::Core::LogInfo("Demo: restart requested (R).");
 
-            std::string tilemapPath;
             std::string err;
-
-            HBE::Renderer::SceneLoadCallbacks loadCb{};
-            loadCb.mesh = [this](const std::string& key) -> HBE::Renderer::Mesh* {
-                if (key == "quad") return m_quadMesh;
-                return nullptr;
-                };
-            loadCb.material = [this](const std::string& key) -> HBE::Renderer::Material* {
-                if (key == "goblin_mat") return &m_goblinMaterial;
-                if (key == "soldier_mat") return &m_soldierMaterial;
-                return nullptr;
-                };
-            loadCb.sheet = [this](const std::string& key)
-                -> const HBE::Renderer::SpriteRenderer2D::SpriteSheetHandle* {
-                if (key == "orc_sheet") return &m_goblinSheet;
-                if (key == "soldier_sheet") return &m_soldierSheet;
-                return nullptr;
-                };
-            loadCb.prefabs = &m_prefabs;
-            loadCb.scripts = &m_scripts;
-            loadCb.animators = &m_animPresets;
-
-            namespace ap = HBE::Core::AssetPaths;
-            std::string scenePath = ap::ResolveUser(SCENE_LOGICAL);
-            {
-                std::error_code ec;
-                if (!std::filesystem::exists(scenePath, ec)) {
-                    scenePath = ap::Resolve(SCENE_LOGICAL);
-                }
-            }
-
-            const bool ok = HBE::Renderer::SceneSerializer::loadFromFile(
-                m_scene, scenePath, loadCb, &tilemapPath, &err);
-
-            if (!ok) {
+            if (!loadSceneNow(&err)) {
                 LogError("Demo restart FAILED: " + err);
             }
             else {
-                m_soldierEntity = {};
-                m_goblinEntity = {};
                 auto& reg = m_scene.registry();
-                for (auto ent : reg.view<HBE::ECS::TagComponent>()) {
-                    const auto& tag = reg.get<HBE::ECS::TagComponent>(ent).tag;
-                    if (tag == "Player") m_soldierEntity = ent;
-                    if (tag == "Goblin") m_goblinEntity = ent;
-                }
-
-                // Scene2D::clear() (inside loadFromFile) nulls out the tile
-                // collision context, so the scene no longer knows about the
-                // tilemap. Without this, the player has a Collider2D but
-                // nothing to collide against and falls through the world.
-                if (!tilemapPath.empty()) {
-                    m_tileMapPath = tilemapPath;
-                }
-                hotReloadTileMap();
-
-                // Re-cache spawn positions from the freshly loaded scene so
-                // edits to sandbox.scene.json take effect on R without needing
-                // a full re-launch. Without this, resetDemoState() teleports
-                // both entities back to the cold-boot cached spawn values.
                 if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {
                     m_demo.playerSpawnX = pTr->posX;
                     m_demo.playerSpawnY = pTr->posY;
@@ -1124,6 +1065,30 @@ void GameLayer::onRender() {
 
         m_ui.setStyle(saved);
 
+        m_ui.spacing(8.0f);
+        m_ui.label("Scene", true);
+
+        if (m_ui.button("btn_scene_save", "F5  Save Scene")) {
+            saveSceneNow();
+            spawnPopup(20.0f, 100.0f, "Scene saved.",
+                HBE::Renderer::Color4{ 0.7f, 1.0f, 0.7f, 1.0f },
+                1.0f, 0.0f);
+        }
+
+        if (m_ui.button("btn_scene_load", "F9  Load Scene")) {
+            std::string err;
+            if (loadSceneNow(&err)) {
+                spawnPopup(20.0f, 100.0f, "Scene loaded.",
+                    HBE::Renderer::Color4{ 0.7f, 1.0f, 0.7f, 1.0f },
+                    1.0f, 0.0f);
+            }
+            else {
+                spawnPopup(20.0f, 100.0f, "Load FAILED: " + err,
+                    HBE::Renderer::Color4{ 1.0f, 0.4f, 0.4f, 1.0f },
+                    2.0f, 0.0f);
+            }
+        }
+
         m_ui.endPanel();
 
         UIRect ppRect{ 20.0f, LOGICAL_HEIGHT - 440.0f, 340.0f, 390.0f };
@@ -1204,101 +1169,7 @@ void GameLayer::onRender() {
     insp.h = 520.0f;
 
     if (m_showInspector) {
-        m_ui.beginPanel("inspector", insp, "Inspector");
-
-        auto& reg = m_scene.registry();
-
-        m_ui.label("Entities", true);
-
-        int shown = 0;
-        for (auto e : reg.view<HBE::Renderer::Transform2D>()) {
-            if (shown++ >= 12) { // keep it readable for now
-                m_ui.label("... (more omitted)", true);
-                break;
-            }
-
-            std::string name = "Entity " + std::to_string((uint32_t)e);
-            if (reg.has<HBE::ECS::TagComponent>(e)) {
-                const auto& tag = reg.get<HBE::ECS::TagComponent>(e).tag;
-                if (!tag.empty()) name = tag + " (" + std::to_string((uint32_t)e) + ")";
-            }
-
-            std::string id = "ent_" + std::to_string((uint32_t)e);
-            if (m_ui.button(id.c_str(), name.c_str())) {
-                m_selectedEntity = e;
-            }
-        }
-
-        m_ui.spacing(10.0f);
-
-        if (reg.valid(m_selectedEntity)) {
-            std::string header = "Selected: " + std::to_string((uint32_t)m_selectedEntity);
-            m_ui.label(header.c_str(), false);
-            m_ui.spacing(6.0f);
-
-            if (reg.has<HBE::ECS::TagComponent>(m_selectedEntity)) {
-                const auto& tag = reg.get<HBE::ECS::TagComponent>(m_selectedEntity).tag;
-                std::string tagLine = "Tag: " + tag;
-                m_ui.label(tagLine.c_str(), true);
-            }
-
-            if (reg.has<HBE::Renderer::Transform2D>(m_selectedEntity)) {
-                auto& tr = reg.get<HBE::Renderer::Transform2D>(m_selectedEntity);
-                m_ui.label("Transform", true);
-
-                m_ui.sliderFloat("tr_x", "posX", tr.posX, -5000.0f, 5000.0f, 1.0f);
-                m_ui.sliderFloat("tr_y", "posY", tr.posY, -5000.0f, 5000.0f, 1.0f);
-                constexpr float PI = 3.14159265358979323846f;
-                m_ui.sliderFloat("tr_rot", "rotation (rad)", tr.rotation, -PI, PI, 0.01f);
-                m_ui.sliderFloat("tr_sx", "scaleX", tr.scaleX, 0.1f, 10.0f, 0.1f);
-                m_ui.sliderFloat("tr_sy", "scaleY", tr.scaleY, 0.1f, 10.0f, 0.1f);
-
-                m_ui.spacing(6.0f);
-            }
-
-            if (reg.has<HBE::Renderer::SpriteComponent2D>(m_selectedEntity)) {
-                auto& spr = reg.get<HBE::Renderer::SpriteComponent2D>(m_selectedEntity);
-                m_ui.label("Sprite", true);
-                m_ui.sliderInt("spr_layer", "layer", spr.layer, -10, 50);
-                m_ui.sliderFloat("spr_sort", "sortKey", spr.sortKey, -5000.0f, 5000.0f, 1.0f);
-                m_ui.sliderFloat("spr_sorty", "sortOffsetY", spr.sortOffsetY, -200.0f, 200.0f, 1.0f);
-                m_ui.spacing(6.0f);
-            }
-
-            if (reg.has<HBE::ECS::Collider2D>(m_selectedEntity)) {
-                auto& col = reg.get<HBE::ECS::Collider2D>(m_selectedEntity);
-                m_ui.label("Collider2D", true);
-                m_ui.sliderFloat("col_hw", "halfW", col.halfW, 0.0f, 500.0f, 0.5f);
-                m_ui.sliderFloat("col_hh", "halfH", col.halfH, 0.0f, 500.0f, 0.5f);
-                m_ui.sliderFloat("col_ox", "offsetX", col.offsetX, -200.0f, 200.0f, 0.5f);
-                m_ui.sliderFloat("col_oy", "offsetY", col.offsetY, -200.0f, 200.0f, 0.5f);
-                m_ui.checkbox("col_trig", "isTrigger", col.isTrigger);
-                m_ui.spacing(6.0f);
-            }
-
-            if (reg.has<HBE::ECS::RigidBody2D>(m_selectedEntity)) {
-                auto& rb = reg.get<HBE::ECS::RigidBody2D>(m_selectedEntity);
-                m_ui.label("RigidBody2D", true);
-                m_ui.checkbox("rb_static", "isStatic", rb.isStatic);
-                m_ui.checkbox("rb_grav", "useGravity", rb.useGravity);
-                m_ui.sliderFloat("rb_vx", "velX", rb.velX, -4000.0f, 4000.0f, 1.0f);
-                m_ui.sliderFloat("rb_vy", "velY", rb.velY, -4000.0f, 4000.0f, 1.0f);
-                m_ui.sliderFloat("rb_damp", "linearDamping", rb.linearDamping, 0.0f, 50.0f, 0.25f);
-                m_ui.spacing(6.0f);
-            }
-
-            if (m_ui.button("btn_focus_player", "Select Player")) {
-                m_selectedEntity = m_soldierEntity;
-            }
-            if (m_ui.button("btn_focus_goblin", "Select Goblin")) {
-                m_selectedEntity = m_goblinEntity;
-            }
-        }
-        else {
-            m_ui.label("No entity selected.", true);
-        }
-
-        m_ui.endPanel();
+        drawInspector();
     }
 
     r2d.endScene();
@@ -1813,4 +1684,497 @@ void GameLayer::drawDemoHUD(HBE::Renderer::Renderer2D& r2d) {
             "Press R to restart", 1.0f,
             HBE::Renderer::Color4{ 0.85f, 0.85f, 0.85f, 1.0f });
     }
+}
+
+void GameLayer::drawInspector() {
+    using namespace HBE::Renderer::UI;
+
+    UIRect insp;
+    insp.x = LOGICAL_WIDTH - 420.0f;
+    insp.y = 20.0f;
+    insp.w = 400.0f;
+    insp.h = 520.0f;
+
+    m_ui.beginScrollPanel("inspector", insp, "Inspector");
+
+    auto& reg = m_scene.registry();
+
+    // -- Collect entities that have a tag; that covers every entity
+    //    created via Scene2D::createEntity() or SceneSerializer, which
+    //    is everything except transient bare-registry entities. --
+    std::vector<HBE::ECS::Entity> ents;
+    ents.reserve(64);
+    for (auto e : reg.view<HBE::ECS::TagComponent>()) {
+        ents.push_back(e);
+    }
+
+    // Clamp pagination if the list shrunk (delete pressed, scene reload).
+    const int total = static_cast<int>(ents.size());
+    if (m_inspectorFirstIndex >= total) m_inspectorFirstIndex = 0;
+    if (m_inspectorFirstIndex < 0)      m_inspectorFirstIndex = 0;
+
+    // -- Header: entity list controls --
+    char hdr[64];
+    std::snprintf(hdr, sizeof(hdr), "Entities  (%d total)", total);
+    m_ui.label(hdr, true);
+
+    // -- Item 20: entity lifecycle controls (Cycle / Create / Delete) --
+    {
+        // Clamp the cycle index in case the preset table changes size.
+        if (m_inspectorCreateTagIdx < 0 ||
+            m_inspectorCreateTagIdx >= kEntityTagPresetsCount) {
+            m_inspectorCreateTagIdx = 0;
+        }
+
+        char cycleLbl[96];
+        std::snprintf(cycleLbl, sizeof(cycleLbl),
+            "Next tag: %s  (click to cycle)",
+            kEntityTagPresets[m_inspectorCreateTagIdx]);
+        if (m_ui.button("btn_cycle_tag_preset", cycleLbl)) {
+            m_inspectorCreateTagIdx =
+                (m_inspectorCreateTagIdx + 1) % kEntityTagPresetsCount;
+        }
+
+        char createLbl[96];
+        std::snprintf(createLbl, sizeof(createLbl),
+            "+ Create '%s' Entity",
+            kEntityTagPresets[m_inspectorCreateTagIdx]);
+        if (m_ui.button("btn_create_entity", createLbl)) {
+            const char* tagName =
+                kEntityTagPresets[m_inspectorCreateTagIdx];
+
+            HBE::ECS::Entity newEnt = m_scene.createEntity();
+
+            // Overwrite the placeholder tag stamped by createEntity()
+            // with the preset name. Unconditional emplace matches the
+            // documented "createEntity stamps a placeholder" behaviour.
+            reg.emplace<HBE::ECS::TagComponent>(newEnt,
+                HBE::ECS::TagComponent{ tagName });
+
+            // Give the new entity a Transform2D at the camera centre so
+            // it's immediately visible / clickable in the world.
+            HBE::Renderer::Transform2D tr{};
+            tr.posX = m_camera.x;
+            tr.posY = m_camera.y;
+            tr.scaleX = 100.0f;
+            tr.scaleY = 100.0f;
+            tr.rotation = 0.0f;
+            reg.emplace<HBE::Renderer::Transform2D>(newEnt, tr);
+
+            m_selectedEntity = newEnt;
+            HBE::Core::LogInfo(std::string("Inspector: created '") +
+                tagName + "' entity at camera centre.");
+        }
+
+        // Delete Selected — safely disarms our cached m_soldierEntity /
+        // m_goblinEntity handles if the user nukes those.
+        if (reg.valid(m_selectedEntity)) {
+            std::string delLbl = "- Delete Selected (" +
+                std::to_string((uint32_t)m_selectedEntity) + ")";
+            if (m_ui.button("btn_delete_entity", delLbl.c_str())) {
+                const HBE::ECS::Entity victim = m_selectedEntity;
+
+                if (victim == m_soldierEntity) m_soldierEntity = {};
+                if (victim == m_goblinEntity)  m_goblinEntity = {};
+
+                reg.destroy(victim);
+                m_selectedEntity = {};
+
+                HBE::Core::LogInfo("Inspector: deleted entity " +
+                    std::to_string((uint32_t)victim) + ".");
+
+                // The `ents` snapshot above is now stale; any code below
+                // that dereferences it would trip the Registry assertion.
+                // Close the panel and bail — next frame re-snapshots.
+                m_ui.endPanel();
+                return;
+            }
+        }
+
+        m_ui.spacing(6.0f);
+    }
+
+    // Prev / Next page buttons (only useful when list overflows).
+    if (total > kInspectorPageSize) {
+        char pageLbl[64];
+        const int lastPageStart =
+            ((total - 1) / kInspectorPageSize) * kInspectorPageSize;
+        std::snprintf(pageLbl, sizeof(pageLbl),
+            "Page %d / %d",
+            (m_inspectorFirstIndex / kInspectorPageSize) + 1,
+            (lastPageStart / kInspectorPageSize) + 1);
+        m_ui.label(pageLbl, true);
+
+        if (m_ui.button("btn_ent_prev", "< Prev")) {
+            m_inspectorFirstIndex =
+                std::max(0, m_inspectorFirstIndex - kInspectorPageSize);
+        }
+        if (m_ui.button("btn_ent_next", "Next >")) {
+            const int cap = std::max(0, total - kInspectorPageSize);
+            m_inspectorFirstIndex =
+                std::min(cap, m_inspectorFirstIndex + kInspectorPageSize);
+        }
+    }
+
+    // -- Entity list (one page) --
+    const int end = std::min(total,
+        m_inspectorFirstIndex + kInspectorPageSize);
+    for (int i = m_inspectorFirstIndex; i < end; ++i) {
+        auto e = ents[i];
+
+        // Defensive: skip anything that got destroyed mid-frame (e.g.
+        // by another system) so we never hit Storage::get on a dead
+        // entity.
+        if (!reg.valid(e)) continue;
+        if (!reg.has<HBE::ECS::TagComponent>(e)) continue;
+
+        std::string name = "Entity " + std::to_string((uint32_t)e);
+        const auto& tag = reg.get<HBE::ECS::TagComponent>(e).tag;
+        if (!tag.empty()) {
+            name = tag + " (" + std::to_string((uint32_t)e) + ")";
+        }
+
+        std::string id = "ent_" + std::to_string((uint32_t)e);
+        if (m_ui.button(id.c_str(), name.c_str())) {
+            m_selectedEntity = e;
+        }
+    }
+
+    m_ui.spacing(10.0f);
+
+    if (reg.valid(m_selectedEntity)) {
+        std::string header = "Selected: " + std::to_string((uint32_t)m_selectedEntity);
+        m_ui.label(header.c_str(), false);
+        m_ui.spacing(6.0f);
+
+        if (reg.has<HBE::ECS::TagComponent>(m_selectedEntity)) {
+            const auto& tag = reg.get<HBE::ECS::TagComponent>(m_selectedEntity).tag;
+            std::string tagLine = "Tag: " + tag;
+            m_ui.label(tagLine.c_str(), true);
+        }
+
+        if (reg.has<HBE::Renderer::PrefabRefComponent>(m_selectedEntity)) {
+            const auto& pr = reg.get<HBE::Renderer::PrefabRefComponent>(m_selectedEntity);
+            std::string prLbl = "Prefab: " + pr.name;
+            m_ui.label(prLbl.c_str(), true);
+        }
+
+        // -- Item 20: Retag Selection cycle --
+        {
+            if (m_inspectorRetagIdx < 0 ||
+                m_inspectorRetagIdx >= kEntityTagPresetsCount) {
+                m_inspectorRetagIdx = 0;
+            }
+
+            char retagCycle[96];
+            std::snprintf(retagCycle, sizeof(retagCycle),
+                "Retag preset: %s  (click to cycle)",
+                kEntityTagPresets[m_inspectorRetagIdx]);
+            if (m_ui.button("btn_retag_cycle", retagCycle)) {
+                m_inspectorRetagIdx =
+                    (m_inspectorRetagIdx + 1) % kEntityTagPresetsCount;
+            }
+
+            char retagApply[96];
+            std::snprintf(retagApply, sizeof(retagApply),
+                "Apply Tag '%s'",
+                kEntityTagPresets[m_inspectorRetagIdx]);
+            if (m_ui.button("btn_retag_apply", retagApply)) {
+                const char* newTag =
+                    kEntityTagPresets[m_inspectorRetagIdx];
+                reg.emplace<HBE::ECS::TagComponent>(m_selectedEntity,
+                    HBE::ECS::TagComponent{ newTag });
+
+                if (m_selectedEntity == m_soldierEntity &&
+                    std::string(newTag) != "Player") {
+                    m_soldierEntity = {};
+                }
+                if (m_selectedEntity == m_goblinEntity &&
+                    std::string(newTag) != "Goblin") {
+                    m_goblinEntity = {};
+                }
+                if (std::string(newTag) == "Player") {
+                    m_soldierEntity = m_selectedEntity;
+                }
+                if (std::string(newTag) == "Goblin") {
+                    m_goblinEntity = m_selectedEntity;
+                }
+            }
+        }
+
+        m_ui.spacing(6.0f);
+
+        if (reg.has<HBE::Renderer::Transform2D>(m_selectedEntity)) {
+            auto& tr = reg.get<HBE::Renderer::Transform2D>(m_selectedEntity);
+            m_ui.label("Transform", true);
+
+            m_ui.sliderFloat("tr_x", "posX", tr.posX, -5000.0f, 5000.0f, 1.0f);
+            m_ui.sliderFloat("tr_y", "posY", tr.posY, -5000.0f, 5000.0f, 1.0f);
+            constexpr float PI = 3.14159265358979323846f;
+            m_ui.sliderFloat("tr_rot", "rotation (rad)", tr.rotation, -PI, PI, 0.01f);
+            m_ui.sliderFloat("tr_sx", "scaleX", tr.scaleX, 0.1f, 10.0f, 0.1f);
+            m_ui.sliderFloat("tr_sy", "scaleY", tr.scaleY, 0.1f, 10.0f, 0.1f);
+
+            m_ui.spacing(6.0f);
+        }
+
+        if (reg.has<HBE::Renderer::SpriteComponent2D>(m_selectedEntity)) {
+            auto& spr = reg.get<HBE::Renderer::SpriteComponent2D>(m_selectedEntity);
+            m_ui.label("Sprite", true);
+            m_ui.sliderInt("spr_layer", "layer", spr.layer, -10, 500);
+            m_ui.sliderFloat("spr_sort", "sortKey", spr.sortKey, -5000.0f, 5000.0f, 1.0f);
+            m_ui.sliderFloat("spr_sorty", "sortOffsetY", spr.sortOffsetY, -200.0f, 200.0f, 1.0f);
+
+            // UV rect - u0, v0, u1, v1 (all in [0..1]).
+            m_ui.sliderFloat("spr_u0", "uv u0", spr.uvRect[0], 0.0f, 1.0f, 0.001f);
+            m_ui.sliderFloat("spr_v0", "uv v0", spr.uvRect[1], 0.0f, 1.0f, 0.001f);
+            m_ui.sliderFloat("spr_u1", "uv u1", spr.uvRect[2], 0.0f, 1.0f, 0.001f);
+            m_ui.sliderFloat("spr_v1", "uv v1", spr.uvRect[3], 0.0f, 1.0f, 0.001f);
+
+            m_ui.checkbox("spr_visible", "visible", spr.visible);
+
+            m_ui.spacing(6.0f);
+        }
+
+        if (reg.has<HBE::ECS::Collider2D>(m_selectedEntity)) {
+            auto& col = reg.get<HBE::ECS::Collider2D>(m_selectedEntity);
+            m_ui.label("Collider2D", true);
+            m_ui.sliderFloat("col_hw", "halfW", col.halfW, 0.0f, 500.0f, 0.5f);
+            m_ui.sliderFloat("col_hh", "halfH", col.halfH, 0.0f, 500.0f, 0.5f);
+            m_ui.sliderFloat("col_ox", "offsetX", col.offsetX, -200.0f, 200.0f, 0.5f);
+            m_ui.sliderFloat("col_oy", "offsetY", col.offsetY, -200.0f, 200.0f, 0.5f);
+            m_ui.checkbox("col_trig", "isTrigger", col.isTrigger);
+            m_ui.spacing(6.0f);
+        }
+
+        if (reg.has<HBE::ECS::RigidBody2D>(m_selectedEntity)) {
+            auto& rb = reg.get<HBE::ECS::RigidBody2D>(m_selectedEntity);
+            m_ui.label("RigidBody2D", true);
+
+            m_ui.checkbox("rb_static", "isStatic", rb.isStatic);
+            m_ui.checkbox("rb_grav", "useGravity", rb.useGravity);
+            m_ui.sliderFloat("rb_gscale", "gravityScale", rb.gravityScale, 0.0f, 10.0f, 0.05f);
+
+            m_ui.sliderFloat("rb_vx", "velX", rb.velX, -4000.0f, 4000.0f, 1.0f);
+            m_ui.sliderFloat("rb_vy", "velY", rb.velY, -4000.0f, 4000.0f, 1.0f);
+            m_ui.sliderFloat("rb_ax", "accelX", rb.accelX, -4000.0f, 4000.0f, 1.0f);
+            m_ui.sliderFloat("rb_ay", "accelY", rb.accelY, -4000.0f, 4000.0f, 1.0f);
+
+            m_ui.sliderFloat("rb_damp", "linearDamping", rb.linearDamping, 0.0f, 50.0f, 0.25f);
+            m_ui.sliderFloat("rb_maxfall", "maxFallSpeed", rb.maxFallSpeed, -4000.0f, 0.0f, 25.0f);
+            m_ui.sliderFloat("rb_step", "maxStepUp", rb.maxStepUp, 0.0f, 200.0f, 0.5f);
+
+            m_ui.checkbox("rb_oneway", "enableOneWay", rb.enableOneWay);
+            m_ui.checkbox("rb_slopes", "enableSlopes", rb.enableSlopes);
+
+            // Read-only-ish: editable for debugging.
+            m_ui.checkbox("rb_grounded_dbg", "grounded (dbg)", rb.grounded);
+
+            m_ui.spacing(6.0f);
+        }
+
+        if (reg.has<HBE::Sandbox::Health>(m_selectedEntity)) {
+            auto& hp = reg.get<HBE::Sandbox::Health>(m_selectedEntity);
+            m_ui.label("Health", true);
+            m_ui.sliderInt("hp_hp", "hp", hp.hp, 0, 100);
+            m_ui.sliderInt("hp_maxhp", "maxHp", hp.maxHp, 1, 100);
+            m_ui.sliderFloat("hp_iframe", "invulnTimer", hp.invulnTimer, 0.0f, 2.0f, 0.01f);
+            m_ui.checkbox("hp_dead", "dead", hp.dead);
+            m_ui.spacing(6.0f);
+        }
+
+        // -- Item 20: Add Component menu --
+        m_ui.spacing(4.0f);
+        m_ui.label("Add Component", true);
+
+        if (!reg.has<HBE::Renderer::Transform2D>(m_selectedEntity)) {
+            if (m_ui.button("btn_add_transform", "+ Add Transform2D")) {
+                HBE::Renderer::Transform2D tr{};
+                tr.posX = m_camera.x;
+                tr.posY = m_camera.y;
+                tr.scaleX = 100.0f;
+                tr.scaleY = 100.0f;
+                reg.emplace<HBE::Renderer::Transform2D>(m_selectedEntity, tr);
+            }
+        }
+
+        if (!reg.has<HBE::Renderer::SpriteComponent2D>(m_selectedEntity)) {
+            if (m_ui.button("btn_add_sprite", "+ Add Sprite2D")) {
+                reg.emplace<HBE::Renderer::SpriteComponent2D>(
+                    m_selectedEntity,
+                    MakeDefaultSprite(m_quadMesh, &m_soldierMaterial));
+            }
+        }
+
+        if (!reg.has<HBE::ECS::Collider2D>(m_selectedEntity)) {
+            if (m_ui.button("btn_add_collider", "+ Add Collider2D")) {
+                HBE::ECS::Collider2D c{};
+                c.halfW   = 16.0f;
+                c.halfH   = 16.0f;
+                c.offsetX = 0.0f;
+                c.offsetY = 0.0f;
+                c.isTrigger = false;
+                reg.emplace<HBE::ECS::Collider2D>(m_selectedEntity, c);
+            }
+        }
+
+        if (!reg.has<HBE::ECS::RigidBody2D>(m_selectedEntity)) {
+            if (m_ui.button("btn_add_rigidbody", "+ Add RigidBody2D")) {
+                HBE::ECS::RigidBody2D rb{};
+                rb.isStatic     = true;
+                rb.useGravity   = false;
+                rb.linearDamping = 0.0f;
+                rb.enableOneWay = true;
+                rb.enableSlopes = true;
+                reg.emplace<HBE::ECS::RigidBody2D>(m_selectedEntity, rb);
+            }
+        }
+
+        if (!reg.has<HBE::Sandbox::Health>(m_selectedEntity)) {
+            if (m_ui.button("btn_add_health", "+ Add Health")) {
+                reg.emplace<HBE::Sandbox::Health>(m_selectedEntity,
+                    HBE::Sandbox::Health{ 3, 3 });
+            }
+        }
+
+        m_ui.spacing(4.0f);
+        m_ui.label("Remove Component", true);
+
+        if (reg.has<HBE::Renderer::Transform2D>(m_selectedEntity)) {
+            if (m_ui.button("btn_rm_transform", "- Remove Transform2D")) {
+                reg.remove<HBE::Renderer::Transform2D>(m_selectedEntity);
+            }
+        }
+        if (reg.has<HBE::Renderer::SpriteComponent2D>(m_selectedEntity)) {
+            if (m_ui.button("btn_rm_sprite", "- Remove Sprite2D")) {
+                reg.remove<HBE::Renderer::SpriteComponent2D>(m_selectedEntity);
+            }
+        }
+        if (reg.has<HBE::ECS::Collider2D>(m_selectedEntity)) {
+            if (m_ui.button("btn_rm_collider", "- Remove Collider2D")) {
+                reg.remove<HBE::ECS::Collider2D>(m_selectedEntity);
+            }
+        }
+        if (reg.has<HBE::ECS::RigidBody2D>(m_selectedEntity)) {
+            if (m_ui.button("btn_rm_rigidbody", "- Remove RigidBody2D")) {
+                reg.remove<HBE::ECS::RigidBody2D>(m_selectedEntity);
+            }
+        }
+        if (reg.has<HBE::Sandbox::Health>(m_selectedEntity)) {
+            if (m_ui.button("btn_rm_health", "- Remove Health")) {
+                reg.remove<HBE::Sandbox::Health>(m_selectedEntity);
+            }
+        }
+
+        m_ui.spacing(6.0f);
+
+        if (m_ui.button("btn_focus_player", "Select Player")) {
+            m_selectedEntity = m_soldierEntity;
+        }
+        if (m_ui.button("btn_focus_goblin", "Select Goblin")) {
+            m_selectedEntity = m_goblinEntity;
+        }
+    }
+    else {
+        m_ui.label("No entity selected.", true);
+    }
+
+    m_ui.endPanel();
+}
+
+bool GameLayer::saveSceneNow(std::string* outError) {
+    HBE::Renderer::SceneSaveCallbacks saveCb{};
+    saveCb.meshKey = [this](const HBE::Renderer::Mesh* m) -> std::string {
+        if (m == m_quadMesh) return "quad";
+        return "";
+        };
+    saveCb.materialKey = [this](const HBE::Renderer::Material* mat) -> std::string {
+        if (mat == &m_goblinMaterial) return "goblin_mat";
+        if (mat == &m_soldierMaterial) return "soldier_mat";
+        return "";
+        };
+    saveCb.sheetKey = [this](const HBE::Renderer::SpriteRenderer2D::SpriteSheetHandle* sh) -> std::string {
+        if (sh == &m_goblinSheet) return "orc_sheet";
+        if (sh == &m_soldierSheet) return "soldier_sheet";
+        return "";
+        };
+    saveCb.prefabs = &m_prefabs;
+
+    namespace ap = HBE::Core::AssetPaths;
+    const std::string scenePath = kSceneSaveGoesToUserData
+        ? ap::ResolveUser(SCENE_LOGICAL)
+        : ap::Resolve(SCENE_LOGICAL);
+
+    if (kSceneSaveGoesToUserData) {
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::path(scenePath).parent_path(), ec);
+    }
+
+    std::string err;
+    const bool ok = HBE::Renderer::SceneSerializer::saveToFile(m_scene, scenePath, saveCb, m_tileMapPath, &err);
+
+    if (!ok) {
+        if (outError) *outError = err;
+        LogError("Scene save FAILED: " + err);
+        return false;
+    }
+
+    LogInfo("Scene saved: " + scenePath);
+    return true;
+}
+
+bool GameLayer::loadSceneNow(std::string* outError) {
+    std::string tilemapPath;
+    std::string err;
+
+    HBE::Renderer::SceneLoadCallbacks loadCb{};
+    loadCb.mesh = [this](const std::string& key) -> HBE::Renderer::Mesh* {
+        if (key == "quad") return m_quadMesh;
+        return nullptr;
+        };
+    loadCb.material = [this](const std::string& key) -> HBE::Renderer::Material* {
+        if (key == "goblin_mat") return &m_goblinMaterial;
+        if (key == "solder_mat") return &m_soldierMaterial;
+        return nullptr;
+        };
+
+    loadCb.prefabs = &m_prefabs;
+    loadCb.scripts = &m_scripts;
+    loadCb.animators = &m_animPresets;
+
+    namespace ap = HBE::Core::AssetPaths;
+    std::string scenePath = ap::ResolveUser(SCENE_LOGICAL);
+    {
+        std::error_code ec;
+        if (!std::filesystem::exists(scenePath, ec)) {
+            scenePath = ap::Resolve(SCENE_LOGICAL);
+        }
+    }
+
+    const bool ok = HBE::Renderer::SceneSerializer::loadFromFile(m_scene, scenePath, loadCb, &tilemapPath, &err);
+
+    if (!ok) {
+        if (outError) *outError = err;
+        LogError("Scene load FAILED: " + err);
+        return false;
+    }
+
+    m_soldierEntity = {};
+    m_goblinEntity = {};
+    m_selectedEntity = {};
+
+    auto& reg = m_scene.registry();
+    for (auto ent : reg.view<HBE::ECS::TagComponent>()) {
+        const auto& tag = reg.get<HBE::ECS::TagComponent>(ent).tag;
+        if (tag == "Player") m_soldierEntity = ent;
+        if (tag == "Goblin") m_goblinEntity = ent;
+    }
+
+    if (!tilemapPath.empty()) {
+        m_tileMapPath = tilemapPath;
+    }
+    hotReloadTileMap();
+
+    LogInfo("Scene loaded: " + scenePath);
+    return true;
 }

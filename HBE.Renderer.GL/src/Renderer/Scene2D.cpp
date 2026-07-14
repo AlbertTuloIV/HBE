@@ -351,6 +351,8 @@ namespace HBE::Renderer {
             auto& tr = m_reg.get<Transform2D>(e);
             auto& spr = m_reg.get<SpriteComponent2D>(e);
 
+            if (!spr.visible) continue;
+
             if (canCull) {
                 const float pad = 0.25f * std::max(std::fabs(tr.scaleX), std::fabs(tr.scaleY));
 

@@ -79,6 +79,7 @@ namespace HBE::Renderer {
         j["uvRect"] = { s.uvRect[0], s.uvRect[1], s.uvRect[2], s.uvRect[3] };
         if (cb.meshKey) j["mesh"] = cb.meshKey(s.mesh);
         if (cb.materialKey) j["material"] = cb.materialKey(s.material);
+        if (!s.visible) j["visible"] = false;
 
         return j;
     }
@@ -109,6 +110,7 @@ namespace HBE::Renderer {
         s.layer = j.value("layer", 0);
         s.sortKey = 0.0f;
         s.sortOffsetY = j.value("sortOffsetY", 0.0f);
+        s.visible = j.value("visible", true);
 
         if (j.contains("uvRect") && j["uvRect"].is_array() && j["uvRect"].size() == 4) {
             s.uvRect[0] = j["uvRect"][0].get<float>();

@@ -54,7 +54,9 @@ namespace HBE::Renderer::UI{
 		m_mousePressedL_queued = false;
 		m_mouseReleasedL_queued = false;
 
-		m_wheelY = 0.0f;
+		// NOTE: do NOT clear m_wheelY here. SDL events are pumped BEFORE
+		// beginFrame, so wheel deltas accumulated during the pump would be
+		// discarded before any panel could consume them. We clear in endFrame.
 		m_panels.clear();
 	}
 
@@ -63,6 +65,8 @@ namespace HBE::Renderer::UI{
 		if (!m_mouseDownL) {
 			m_active = 0;
 		}
+		// clear wheel accumulator so next frame starts fresh
+		m_wheelY = 0.0f;
 	}
 
 	void UIContext::onEvent(HBE::Core::Event& e) {
@@ -188,11 +192,82 @@ namespace HBE::Renderer::UI{
 			p.cursorY -= (m_style.itemH * 0.8f);
 			m_panels.back() = p;
 		}
+		// record starting cursor for content-height measurement
+		m_panels.back().startCursorY = m_panels.back().cursorY;
+		return true;
+	}
+
+	bool UIContext::beginScrollPanel(const char* id, const UIRect& rect, const char* title) {
+		// share layout with beginPanel, then apply persistent scroll offset
+		beginPanel(id, rect, title);
+
+		if (!id || !id[0]) return true;
+		const std::uint32_t hid = hashId(id);
+
+		auto& p = m_panels.back();
+		p.id = hid;
+		p.scrollable = true;
+
+		auto it = m_panelScroll.find(hid);
+		float offset = (it == m_panelScroll.end()) ? 0.0f : it->second;
+
+		// pre-clamp against last-frame content height (if we have one)
+		auto ith = m_panelContentH.find(hid);
+		if (ith != m_panelContentH.end()) {
+			float maxScroll = ith->second - p.content.h;
+			if (maxScroll < 0.0f) maxScroll = 0.0f;
+			if (offset < 0.0f) offset = 0.0f;
+			if (offset > maxScroll) offset = maxScroll;
+		}
+		else if (offset < 0.0f) {
+			offset = 0.0f;
+		}
+
+		p.scrollOffset = offset;
+		// shift ALL subsequent widgets UP by offset (they'll be drawn higher off-panel)
+		// i.e., raise the starting cursorY so content appears further down in the stack
+		p.cursorY += offset;
+		p.startCursorY = p.cursorY;
 		return true;
 	}
 
 	void UIContext::endPanel() {
-		if (!m_panels.empty()) m_panels.pop_back();
+		if (m_panels.empty()) return;
+
+		PanelState p = m_panels.back();
+
+		if (p.scrollable && p.id != 0) {
+			// measure content stack height (independent of scrollOffset shift)
+			float contentH = p.startCursorY - p.cursorY;
+			if (contentH < 0.0f) contentH = 0.0f;
+			m_panelContentH[p.id] = contentH;
+
+			// consume wheel if mouse is over the panel outer rect
+			const bool hovered = m_mouseInViewport && p.outer.contains(m_mouseX, m_mouseY);
+			if (hovered && m_wheelY != 0.0f) {
+				const float step = m_style.itemH * 1.25f; // pixels per wheel notch
+				float newOffset = p.scrollOffset - m_wheelY * step;
+
+				float maxScroll = contentH - p.content.h;
+				if (maxScroll < 0.0f) maxScroll = 0.0f;
+				if (newOffset < 0.0f) newOffset = 0.0f;
+				if (newOffset > maxScroll) newOffset = maxScroll;
+
+				m_panelScroll[p.id] = newOffset;
+				m_wheelY = 0.0f; // consume so world-camera zoom doesn't also react
+			}
+			else {
+				// keep stored offset clamped even when not scrolling this frame
+				float maxScroll = contentH - p.content.h;
+				if (maxScroll < 0.0f) maxScroll = 0.0f;
+				float clamped = p.scrollOffset;
+				if (clamped < 0.0f) clamped = 0.0f;
+				if (clamped > maxScroll) clamped = maxScroll;
+				m_panelScroll[p.id] = clamped;
+			}
+		}
+
+		m_panels.pop_back();
 	}
 
 	void UIContext::label(const char* text, bool muted) {
