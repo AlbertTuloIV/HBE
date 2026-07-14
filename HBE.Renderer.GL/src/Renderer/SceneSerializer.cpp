@@ -18,6 +18,8 @@
 
 #include <fstream>
 #include <sstream>
+#include <filesystem>
+#include <system_error>
 #include <vector>
 #include <unordered_map>
 #include <functional>
@@ -37,6 +39,14 @@ namespace HBE::Renderer {
     }
 
     static bool writeAllText(const std::string& path, const std::string& text) {
+        // Ensure the parent directory exists so a missing scenes\ folder
+        // doesn't silently break F5 save / R restart.
+        std::error_code ec;
+        std::filesystem::path fsp(path);
+        if (fsp.has_parent_path()) {
+            std::filesystem::create_directories(fsp.parent_path(), ec);
+            // ec is non-fatal here; ofstream will surface the real error.
+        }
         std::ofstream f(path, std::ios::binary);
         if (!f.is_open()) return false;
         f.write(text.data(), (std::streamsize)text.size());
