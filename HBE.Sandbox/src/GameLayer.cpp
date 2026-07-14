@@ -70,6 +70,10 @@ namespace {
         return target;
     }
 
+    static float LerpF(float from, float to, float t) {
+        return from + (to - from) * t;
+    }
+
     static void RegisterDefaultBindings(HBE::Input::InputMap& map)
     {
         using namespace HBE::Input;
@@ -263,9 +267,9 @@ void GameLayer::onAttach(Application& app) {
     app.audio().setBusGain(HBE::Platform::Audio::Bus::Ambient, 0.80f);
 
     const std::string testSoundPath = ap::Resolve("audio/test_sound.wav");
-    app.audio().loadSound("footstep", testSoundPath, true);
-    app.audio().loadSound("hit", testSoundPath, true);
-    app.audio().loadSound("ui_blip", testSoundPath, true);
+    //app.audio().loadSound("footstep", testSoundPath, true);
+    //app.audio().loadSound("hit", testSoundPath, true);
+    //app.audio().loadSound("ui_blip", testSoundPath, true);
 
     m_collisionLayer = m_tileMap.findLayer("Ground");
     if (!m_collisionLayer) {
@@ -429,9 +433,29 @@ void GameLayer::onAttach(Application& app) {
             reg.emplace<HBE::ECS::RigidBody2D>(m_goblinEntity, rb);
 
         if (!reg.has<HBE::ECS::Script>(m_goblinEntity)) {
-            HBE::ECS::Script sc = m_scripts.create("GoblinTest", m_goblinEntity, m_scene);
+            HBE::ECS::Script sc = m_scripts.create("GoblinAI",
+                m_goblinEntity,
+                m_scene);
             reg.emplace<HBE::ECS::Script>(m_goblinEntity, std::move(sc));
         }
+    }
+    {
+        auto& reg = m_scene.registry();
+
+        if (reg.valid(m_goblinEntity) && !reg.has<HBE::Sandbox::Health>(m_goblinEntity)) {
+            reg.emplace<HBE::Sandbox::Health>(m_goblinEntity, HBE::Sandbox::Health{ 3, 3 });
+        }
+
+        if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {
+            m_demo.playerSpawnX = pTr->posX;
+            m_demo.playerSpawnY = pTr->posY;
+        }
+        if (auto* gTr = m_scene.getTransform(m_goblinEntity)) {
+            m_demo.goblinSpawnX = gTr->posX;
+            m_demo.goblinSpawnY = gTr->posY;
+        }
+        m_demo.state = HBE::Sandbox::DemoState::Playing;
+        m_demo.endBannerTimer = 0.0f;
     }
 
     LogInfo("GameLayer attached.");
@@ -766,6 +790,91 @@ void GameLayer::onUpdate(float dt) {
             m_fpsHistory.erase(m_fpsHistory.begin(), m_fpsHistory.begin() + (m_fpsHistory.size() - m_fpsHistoryMax));
         }
     }
+    if (KeyPressed(SDL_SCANCODE_R)) {
+        const bool allowRestart =
+            (m_demo.state == HBE::Sandbox::DemoState::Playing) ||
+            (m_demo.endBannerTimer >= HBE::Sandbox::demo::RESTART_DELAY);
+
+        if (allowRestart) {
+            HBE::Core::LogInfo("Demo: restart requested (R).");
+
+            std::string tilemapPath;
+            std::string err;
+
+            HBE::Renderer::SceneLoadCallbacks loadCb{};
+            loadCb.mesh = [this](const std::string& key) -> HBE::Renderer::Mesh* {
+                if (key == "quad") return m_quadMesh;
+                return nullptr;
+                };
+            loadCb.material = [this](const std::string& key) -> HBE::Renderer::Material* {
+                if (key == "goblin_mat") return &m_goblinMaterial;
+                if (key == "soldier_mat") return &m_soldierMaterial;
+                return nullptr;
+                };
+            loadCb.sheet = [this](const std::string& key)
+                -> const HBE::Renderer::SpriteRenderer2D::SpriteSheetHandle* {
+                if (key == "orc_sheet") return &m_goblinSheet;
+                if (key == "soldier_sheet") return &m_soldierSheet;
+                return nullptr;
+                };
+            loadCb.prefabs = &m_prefabs;
+            loadCb.scripts = &m_scripts;
+            loadCb.animators = &m_animPresets;
+
+            namespace ap = HBE::Core::AssetPaths;
+            std::string scenePath = ap::ResolveUser(SCENE_LOGICAL);
+            {
+                std::error_code ec;
+                if (!std::filesystem::exists(scenePath, ec)) {
+                    scenePath = ap::Resolve(SCENE_LOGICAL);
+                }
+            }
+
+            const bool ok = HBE::Renderer::SceneSerializer::loadFromFile(
+                m_scene, scenePath, loadCb, &tilemapPath, &err);
+
+            if (!ok) {
+                LogError("Demo restart FAILED: " + err);
+            }
+            else {
+                m_soldierEntity = {};
+                m_goblinEntity = {};
+                auto& reg = m_scene.registry();
+                for (auto ent : reg.view<HBE::ECS::TagComponent>()) {
+                    const auto& tag = reg.get<HBE::ECS::TagComponent>(ent).tag;
+                    if (tag == "Player") m_soldierEntity = ent;
+                    if (tag == "Goblin") m_goblinEntity = ent;
+                }
+
+                // Scene2D::clear() (inside loadFromFile) nulls out the tile
+                // collision context, so the scene no longer knows about the
+                // tilemap. Without this, the player has a Collider2D but
+                // nothing to collide against and falls through the world.
+                if (!tilemapPath.empty()) {
+                    m_tileMapPath = tilemapPath;
+                }
+                hotReloadTileMap();
+
+                // Re-cache spawn positions from the freshly loaded scene so
+                // edits to sandbox.scene.json take effect on R without needing
+                // a full re-launch. Without this, resetDemoState() teleports
+                // both entities back to the cold-boot cached spawn values.
+                if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {
+                    m_demo.playerSpawnX = pTr->posX;
+                    m_demo.playerSpawnY = pTr->posY;
+                }
+                if (auto* gTr = m_scene.getTransform(m_goblinEntity)) {
+                    m_demo.goblinSpawnX = gTr->posX;
+                    m_demo.goblinSpawnY = gTr->posY;
+                }
+
+                resetDemoState();
+                spawnPopup(20.0f, 100.0f, "Restarted.",
+                    HBE::Renderer::Color4{ 0.6f, 1.0f, 0.6f, 1.0f },
+                    1.0f, 0.0f);
+            }
+        }
+    }
     m_watcher.poll(dt);
     m_scene.update(dt, [&](const std::string& ev) {
         Transform2D* tr = m_scene.getTransform(m_soldierEntity);
@@ -775,32 +884,70 @@ void GameLayer::onUpdate(float dt) {
         if (ev == "footstep") {
             spawnPopup(px, py - 30.0f, "step", Color4{ 0.8f,0.9f,1.0f,1.0f }, 0.35f, 35.0f);
 
-            HBE::Platform::Audio::PlayParams p;
-            p.bus = HBE::Platform::Audio::Bus::SFX;
-            p.gain = 0.55f;
-            p.positional = true;
-            p.worldX = px;
-            p.worldY = py;
-            p.minDistance = 24.0f;
-            p.maxDistance = 260.0f;
-            p.panRange = 220.0f;
+            //HBE::Platform::Audio::PlayParams p;
+            //p.bus = HBE::Platform::Audio::Bus::SFX;
+            //p.gain = 0.55f;
+            //p.positional = true;
+            //p.worldX = px;
+            //p.worldY = py;
+            //p.minDistance = 24.0f;
+            //p.maxDistance = 260.0f;
+            //p.panRange = 220.0f;
 
-            m_app->audio().playSoundEx("footstep", p);
+            //m_app->audio().playSoundEx("footstep", p);
         }
         else if (ev == "hitframe") {
-            spawnPopup(px, py + 50.0f, "HIT!", Color4{ 1.0f,0.3f,0.2f,1.0f }, 0.55f, 25.0f);
+            auto& reg = m_scene.registry();
 
-            HBE::Platform::Audio::PlayParams p;
-            p.bus = HBE::Platform::Audio::Bus::SFX;
-            p.gain = 0.9f;
-            p.positional = true;
-            p.worldX = px;
-            p.worldY = py;
-            p.minDistance = 18.0f;
-            p.maxDistance = 320.0f;
-            p.panRange = 260.0f;
+            if (reg.valid(m_soldierEntity) && reg.valid(m_goblinEntity) &&
+                reg.has<Transform2D>(m_soldierEntity) &&
+                reg.has<HBE::ECS::Collider2D>(m_soldierEntity) &&
+                reg.has<Transform2D>(m_goblinEntity) &&
+                reg.has<HBE::ECS::Collider2D>(m_goblinEntity) &&
+                reg.has<HBE::Sandbox::Health>(m_goblinEntity)) {
+                
+                auto& pTr = reg.get<Transform2D>(m_soldierEntity);
+                auto& pCol = reg.get<HBE::ECS::Collider2D>(m_soldierEntity);
+                auto& gTr = reg.get<Transform2D>(m_goblinEntity);
+                auto& gCol = reg.get<HBE::ECS::Collider2D>(m_goblinEntity);
+                auto& gHp = reg.get<HBE::Sandbox::Health>(m_goblinEntity);
 
-            m_app->audio().playSoundEx("hit", p);
+                const float facing = (pTr.scaleX >= 0.0f) ? +1.0f : -1.0f;
+
+                const float forward = 0.5f * (pCol.halfW + HBE::Sandbox::demo::ATTACK_REACH_PX);
+
+                const float ax = pTr.posX + pCol.offsetX + facing * forward;
+                const float ay = pTr.posY + pCol.offsetY;
+                const float ahx = 0.5f * HBE::Sandbox::demo::ATTACK_REACH_PX;
+                const float ahy = 0.5f * HBE::Sandbox::demo::ATTACK_HEIGHT_PX;
+
+                const float gx = gTr.posX + gCol.offsetX;
+                const float gy = gTr.posY + gCol.offsetY;
+
+                const bool overlap = std::fabs(ax - gx) <= (ahx + gCol.halfW) &&
+                    std::fabs(ay - gy) <= (ahy + gCol.halfH);
+
+                const bool canDamage = overlap && !gHp.dead && gHp.invulnTimer <= 0.0f;
+
+                if (canDamage) {
+                    gHp.hp -= 1;
+                    gHp.invulnTimer = HBE::Sandbox::demo::HIT_IFRAMES_SEC;
+                    
+                    spawnPopup(gTr.posX, gTr.posY + 60.0f, "-1",
+                        Color4{ 1.0f, 0.9f, 0.2f, 1.0f },
+                        0.75f, 40.0f);
+
+                    if (gHp.hp <= 0) {
+                        gHp.hp = 0;
+                        gHp.dead = true;
+                        gHp.deathTimer = HBE::Sandbox::demo::DEATH_FADE_SEC;
+
+                        spawnPopup(gTr.posX, gTr.posY + 90.0f, "DEFEATED",
+                            Color4{ 1.0f, 0.3f, 0.3f, 1.0f },
+                            1.2f, 20.0f);
+                    }
+                }
+            }
         }
         });
 
@@ -846,9 +993,14 @@ void GameLayer::onUpdate(float dt) {
     }
 
     m_particles.update(dt);
-    m_camera.x = playerTr->posX;
-    m_camera.y = playerTr->posY;
+
+    // Camera lerp — feels smoother than snap. Item 22 will replace this
+    // with a proper deadzone / look-ahead system.
+    m_camera.x = LerpF(m_camera.x, playerTr->posX, HBE::Sandbox::demo::CAMERA_LERP);
+    m_camera.y = LerpF(m_camera.y, playerTr->posY, HBE::Sandbox::demo::CAMERA_LERP);
     m_app->gl().setCamera(m_camera);
+
+    updateDemoLogic(dt);
 
     for (auto& p : m_popups) {
         p.life -= dt;
@@ -872,32 +1024,6 @@ void GameLayer::onRender() {
     r2d.beginScene(m_camera, HBE::Renderer::RenderPass::World);
 
     m_tileRenderer.draw(r2d, m_tileMap);
-
-    HBE::Renderer::TextRenderer2D::TextAnim dmg{};
-    dmg.t = std::fmod(m_uiAnimT, 1.0f);
-    dmg.duration = 1.0f;
-    dmg.autoExpire = true;
-    dmg.fadeIn = true;
-    dmg.fadeInTime = 0.05f;
-    dmg.fadeOut = true;
-    dmg.fadeOutTime = 0.35f;
-    dmg.velY = 40.0f;
-    dmg.startScale = 1.2f;
-    dmg.endScale = 1.0f;
-
-    Transform2D* trg = m_scene.getTransform(m_goblinEntity);
-    if (trg) {
-        m_text.drawTextAnimated(r2d,
-            trg->posX, trg->posY + 40.0f,
-            "-25",
-            1.0f,
-            { 1.0f, 0.0f, 0.0f, 1.0f },
-            TextRenderer2D::TextAlignH::Center,
-            TextRenderer2D::TextAlignV::Baseline,
-            0.0f,
-            1.0f,
-            dmg);
-    }
 
     m_scene.render(r2d);
     m_particles.render(r2d);
@@ -944,6 +1070,9 @@ void GameLayer::onRender() {
     uiCam.viewportHeight = LOGICAL_HEIGHT;
 
     r2d.beginScene(uiCam, HBE::Renderer::RenderPass::UI);
+
+    // Item 19 · demo HUD overlay (HP top-right, WIN/LOSE banner).
+    drawDemoHUD(r2d);
 
     m_ui.bind(&m_app->renderer2D(), &m_debug, &m_text);
 
@@ -1423,6 +1552,10 @@ void GameLayer::registerScripts() {
 
                 if (inputX != 0.0f) {
                     body.velX = Approach(body.velX, targetVX, ax * dt);
+                    if (auto* tr = m_scene.getTransform(e)) {
+                        const float mag = std::fabs(tr->scaleX);
+                        tr->scaleX = (inputX < 0.0f) ? -mag : mag;
+                    }
                 }
                 else if (body.grounded) {
                     body.velX = Approach(body.velX, 0.0f, friction * dt);
@@ -1432,7 +1565,9 @@ void GameLayer::registerScripts() {
                     body.grounded = false;
                 }
 
-                if (JumpPressed && body.grounded && !Down) {
+                if (JumpPressed && body.grounded && Down) {
+                    // DOWN + JUMP: temporarily disable one-way collision so the
+                    // player falls through the platform they're standing on.
                     body.oneWayDisableTimer = 0.20f;
                     body.velY = std::min(body.velY, -120.0f);
                     body.grounded = false;
@@ -1446,17 +1581,47 @@ void GameLayer::registerScripts() {
             return sc;
         });
 
-    m_scripts.registerScript("GoblinTest",
-        [this](Entity, Scene2D&) -> Script {
+    m_scripts.registerScript("GoblinAI",
+        [this](Entity /*owner*/, Scene2D& /*scene*/) -> Script {
             Script sc{};
-            sc.name = "GoblinTest";
+            sc.name = "GoblinAI";
             sc.onUpdate = [this](Entity e, float dt) {
-                (void)dt;
-                if (auto* gAnim = m_scene.getSpriteAnimator(e)) {
-                    gAnim->setBool("moving", false);
-                    if (HBE::Input::ActionPressed(HBE::Input::Action::UIConfirm)) {
-                        gAnim->trigger("attack");
+                using namespace HBE::Sandbox;
+
+                auto& reg = m_scene.registry();
+                auto* tr = m_scene.getTransform(e);
+                if (!tr) return;
+
+                // Do nothing once dead so the fade-out doesn't move.
+                if (reg.has<Health>(e) && reg.get<Health>(e).dead) {
+                    if (auto* gAnim = m_scene.getSpriteAnimator(e)) {
+                        gAnim->setBool("moving", false);
                     }
+                    return;
+                }
+
+                // Patrol between spawnX +/- radius.
+                const float leftBound = m_demo.goblinSpawnX - demo::GOBLIN_PATROL_RADIUS;
+                const float rightBound = m_demo.goblinSpawnX + demo::GOBLIN_PATROL_RADIUS;
+
+                // Direction lives in Transform2D.scaleX sign; -1 = left,
+                // +1 = right. Preserve magnitude the same way PlayerController does.
+                const float dirSign = (tr->scaleX >= 0.0f) ? +1.0f : -1.0f;
+                tr->posX += dirSign * demo::GOBLIN_PATROL_SPEED * dt;
+
+                if (tr->posX <= leftBound) {
+                    tr->posX = leftBound;
+                    const float mag = std::fabs(tr->scaleX);
+                    tr->scaleX = +mag;   // face right
+                }
+                else if (tr->posX >= rightBound) {
+                    tr->posX = rightBound;
+                    const float mag = std::fabs(tr->scaleX);
+                    tr->scaleX = -mag;   // face left
+                }
+
+                if (auto* gAnim = m_scene.getSpriteAnimator(e)) {
+                    gAnim->setBool("moving", true);
                 }
                 };
             return sc;
@@ -1513,4 +1678,139 @@ void GameLayer::registerAnimatorPresets() {
 
     HBE::Core::LogInfo("AnimationPresetRegistry: registered "
         + std::to_string(m_animPresets.size()) + " preset(s).");
+}
+
+void GameLayer::resetDemoState() {
+    using namespace HBE::Sandbox;
+
+    auto& reg = m_scene.registry();
+
+    // 1. Goblin: reset Health + snap back to spawn.
+    if (reg.valid(m_goblinEntity)) {
+        if (reg.has<Health>(m_goblinEntity)) {
+            auto& gHp = reg.get<Health>(m_goblinEntity);
+            gHp.hp = gHp.maxHp;
+            gHp.invulnTimer = 0.0f;
+            gHp.deathTimer = 0.0f;
+            gHp.dead = false;
+        }
+        else {
+            reg.emplace<Health>(m_goblinEntity, Health{ 3, 3 });
+        }
+
+        if (auto* gTr = m_scene.getTransform(m_goblinEntity)) {
+            gTr->posX = m_demo.goblinSpawnX;
+            gTr->posY = m_demo.goblinSpawnY;
+            const float mag = std::fabs(gTr->scaleX);
+            gTr->scaleX = -mag;
+        }
+    }
+    if (reg.valid(m_soldierEntity)) {
+        if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {
+            pTr->posX = m_demo.playerSpawnX;
+            pTr->posY = m_demo.playerSpawnY;
+            const float mag = std::fabs(pTr->scaleX);
+            pTr->scaleX = +mag;
+        }
+        if (reg.has<HBE::ECS::RigidBody2D>(m_soldierEntity)) {
+            auto& body = reg.get<HBE::ECS::RigidBody2D>(m_soldierEntity);
+            body.velX = 0.0f;
+            body.velY = 0.0f;
+            body.accelX = 0.0f;
+            body.accelY = 0.0f;
+            body.grounded = false;
+            body.oneWayDisableTimer = 0.0f;
+        }
+    }
+    m_demo.state = DemoState::Playing;
+    m_demo.endBannerTimer = 0.0f;
+
+    if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {
+        m_camera.x = pTr->posX;
+        m_camera.y = pTr->posY;
+        m_app->gl().setCamera(m_camera);
+    }
+
+    HBE::Core::LogInfo("Demo: state reset.");
+}
+
+void GameLayer::updateDemoLogic(float dt) {
+    using namespace HBE::Sandbox;
+
+    auto& reg = m_scene.registry();
+
+    for (auto e : reg.view<Health>()) {
+        auto& h = reg.get<Health>(e);
+        if (h.invulnTimer > 0.0f) h.invulnTimer = std::max(0.0f, h.invulnTimer - dt);
+        if (h.dead && h.deathTimer > 0.0f) h.deathTimer = std::max(0.0f, h.deathTimer - dt);
+    }
+
+    if (m_demo.state != DemoState::Playing) {
+        m_demo.endBannerTimer += dt;
+        return;
+    }
+
+    if (reg.valid(m_goblinEntity) && reg.has<Health>(m_goblinEntity)) {
+        const auto& gHp = reg.get<Health>(m_goblinEntity);
+        if (gHp.dead && gHp.deathTimer <= 0.0f) {
+            m_demo.state = DemoState::Won;
+            m_demo.endBannerTimer = 0.0f;
+            HBE::Core::LogInfo("Demo: WIN.");
+        }
+    }
+
+    if (reg.valid(m_soldierEntity) && reg.has<Transform2D>(m_soldierEntity)) {
+        const auto& pTr = reg.get<Transform2D>(m_soldierEntity);
+        if (pTr.posY < demo::LOSE_Y_THRESHOLD) {
+            m_demo.state = DemoState::Lost;
+            m_demo.endBannerTimer = 0.0f;
+            HBE::Core::LogInfo("Demo: LOSE.");
+        }
+    }
+}
+
+void GameLayer::drawDemoHUD(HBE::Renderer::Renderer2D& r2d) {
+    using namespace HBE::Sandbox;
+
+    // Called from onRender inside a UI-space beginScene. Coordinates
+    // are LOGICAL_WIDTH x LOGICAL_HEIGHT screen-space.
+
+    auto& reg = m_scene.registry();
+
+    // -- Goblin HP readout in the top-right --
+    if (reg.valid(m_goblinEntity) && reg.has<Health>(m_goblinEntity)) {
+        const auto& gHp = reg.get<Health>(m_goblinEntity);
+        std::string hpText = "Goblin HP: " +
+            std::to_string(gHp.hp) + " / " + std::to_string(gHp.maxHp);
+
+        HBE::Renderer::Color4 hpColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+        if (gHp.dead) hpColor = { 0.6f, 0.6f, 0.6f, 1.0f };
+        else if (gHp.hp == 1) hpColor = { 1.0f, 0.35f, 0.25f, 1.0f };
+
+        m_text.drawText(r2d,
+            LOGICAL_WIDTH - 260.0f, 30.0f,
+            hpText, 1.0f, hpColor);
+    }
+
+    // -- WIN / LOSE banner --
+    if (m_demo.state == DemoState::Won) {
+        m_text.drawText(r2d,
+            LOGICAL_WIDTH * 0.5f - 90.0f, LOGICAL_HEIGHT * 0.5f - 20.0f,
+            "YOU WIN", 2.5f,
+            HBE::Renderer::Color4{ 0.4f, 1.0f, 0.5f, 1.0f });
+        m_text.drawText(r2d,
+            LOGICAL_WIDTH * 0.5f - 130.0f, LOGICAL_HEIGHT * 0.5f + 30.0f,
+            "Press R to restart", 1.0f,
+            HBE::Renderer::Color4{ 0.85f, 0.85f, 0.85f, 1.0f });
+    }
+    else if (m_demo.state == DemoState::Lost) {
+        m_text.drawText(r2d,
+            LOGICAL_WIDTH * 0.5f - 100.0f, LOGICAL_HEIGHT * 0.5f - 20.0f,
+            "YOU LOSE", 2.5f,
+            HBE::Renderer::Color4{ 1.0f, 0.4f, 0.4f, 1.0f });
+        m_text.drawText(r2d,
+            LOGICAL_WIDTH * 0.5f - 130.0f, LOGICAL_HEIGHT * 0.5f + 30.0f,
+            "Press R to restart", 1.0f,
+            HBE::Renderer::Color4{ 0.85f, 0.85f, 0.85f, 1.0f });
+    }
 }

@@ -1,0 +1,34 @@
+{
+  "version": 3,
+  "tilemap": "maps/test_map.json",
+  "entities": [
+    {
+      "name": "Player",
+      "uuid": "49bcad9622a8b072e8b70ed4a1132f90",
+      "prefab": "Player",
+      "components": {
+        "Transform2D": {
+          "x": 239.6589813232422,
+          "y": 90.0,
+          "sx": 400.0,
+          "sy": 400.0,
+          "rot": 0.0
+        }
+      }
+    },
+    {
+      "name": "Goblin",
+      "uuid": "67d0e4d0093fb241869e64013aeb59a2",
+      "prefab": "Goblin",
+      "components": {
+        "Transform2D": {
+          "x": 1080.0,
+          "y": 95.0,
+          "sx": 400.0,
+          "sy": 400.0,
+          "rot": 0.0
+        }
+      }
+    }
+  ]
+}

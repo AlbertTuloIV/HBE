@@ -1,6 +1,7 @@
 #pragma once
 #include "DevConsole.h"
 #include "ParticleEffects.h"
+#include "DemoGame.h"
 
 #include "HBE/Core/Layer.h"
 #include "HBE/Core/FileWatcher.h"
@@ -89,6 +90,8 @@ private:
 	static constexpr float LOGICAL_WIDTH = 1280.0f;
 	static constexpr float LOGICAL_HEIGHT = 720.0f;
 
+	HBE::Sandbox::DemoGameState m_demo{};
+
 	HBE::Renderer::Camera2D m_camera{};
 	HBE::Renderer::Scene2D m_scene{};
 	HBE::Renderer::PrefabLibrary m_prefabs{};
@@ -157,4 +160,8 @@ private:
 	
 	void registerScripts();
 	void registerAnimatorPresets();
+
+	void resetDemoState();
+	void updateDemoLogic(float dt);
+	void drawDemoHUD(HBE::Renderer::Renderer2D& r2d);
 };
