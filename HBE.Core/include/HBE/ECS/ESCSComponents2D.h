@@ -22,6 +22,8 @@ namespace HBE::Renderer {
         float uvRect[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
 
         float sortOffsetY = 0.0f; // pixels/world units: negative moves pivot down (toward feet)
+
+        bool visible = true;
     };
 
 

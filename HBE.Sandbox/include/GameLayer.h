@@ -164,4 +164,18 @@ private:
 	void resetDemoState();
 	void updateDemoLogic(float dt);
 	void drawDemoHUD(HBE::Renderer::Renderer2D& r2d);
+
+	void drawInspector();
+
+	bool saveSceneNow(std::string* outError = nullptr);
+	bool loadSceneNow(std::string* outError = nullptr);
+
+	int m_inspectorFirstIndex = 0;
+
+	static constexpr int kInspectorPageSize = 12;
+
+	int m_inspectorCreateTagIdx = 0;
+	int m_inspectorRetagIdx = 0;
+
+	bool m_inspectorShowAddComponent = false;
 };

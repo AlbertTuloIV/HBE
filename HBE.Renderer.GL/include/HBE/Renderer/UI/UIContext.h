@@ -29,6 +29,9 @@ namespace HBE::Renderer::UI {
 
 		// ---- Layout Helpers ----
 		bool beginPanel(const char* id, const UIRect& rect, const char* title = nullptr);
+		// Scrollable variant: enables mouse-wheel scrolling and consumes overflow.
+		// The `id` must be non-null and stable across frames.
+		bool beginScrollPanel(const char* id, const UIRect& rect, const char* title = nullptr);
 		void endPanel();
 
 		void spacing(float h);
@@ -64,6 +67,11 @@ namespace HBE::Renderer::UI {
 			UIRect content{};
 			float cursorY = 0.0f; // top-down cursor inside content
 			float cursorX = 0.0f;
+			// scroll bookkeeping
+			std::uint32_t id = 0;
+			float startCursorY = 0.0f;   // cursor position right after title reservation
+			float scrollOffset = 0.0f;   // pixels the content is shifted UP by
+			bool scrollable = false;
 		};
 
 		// Rendering
@@ -96,6 +104,11 @@ namespace HBE::Renderer::UI {
 
 		// Persistent widget state keyed by hashed id
 		std::unordered_map<std::uint32_t, bool> m_boolState;
+
+		// Persistent scroll offset per scrollable panel id
+		std::unordered_map<std::uint32_t, float> m_panelScroll;
+		// Last-frame measured content height per scrollable panel id
+		std::unordered_map<std::uint32_t, float> m_panelContentH;
 
 		// Panel stack
 		std::vector<PanelState> m_panels;
