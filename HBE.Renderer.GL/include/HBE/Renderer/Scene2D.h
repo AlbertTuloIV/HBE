@@ -5,11 +5,14 @@
 #include <string>
 #include <unordered_map>
 
-#include "HBE/ECS/Registry.h"
 #include "HBE/Renderer/RenderItem.h"
 #include "HBE/Renderer/Transform2D.h"
 #include "HBE/Renderer/SpriteAnimationStateMachine.h"
+
+#include "HBE/ECS/Registry.h"
 #include "HBE/ECS/ESCSComponents2D.h"
+
+#include "HBE/Core/EventBus.h"
 
 namespace HBE::Renderer {
 
@@ -75,11 +78,15 @@ namespace HBE::Renderer {
         HBE::ECS::Registry& registry() { return m_reg; }
         const HBE::ECS::Registry& registry() const { return m_reg; }
 
+        HBE::Core::EventBus& eventBus() { return m_bus; }
+        const HBE::Core::EventBus& eventBus() const { return m_bus; }
+
         bool cullingEnabled() const { return m_cullingEnabled; }
         bool tryAdoptId(EntityID e, const std::string& uuid, const std::string& tag);
 
     private:
         HBE::ECS::Registry m_reg;
+        HBE::Core::EventBus m_bus;
 
         Physics2DSettings m_physics{};
 
