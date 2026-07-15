@@ -37,3 +37,5 @@ bindings.json
 HBE.Sandbox/bindings.cfg
 HBE.Sandbox/bindings.json
 x64/**/bindings.cfg
+/MegaX/obj
+/MegaX/bin

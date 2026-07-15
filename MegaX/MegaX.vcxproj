@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{e1cd4887-7e74-4033-a21a-e8b0084afa7f}</ProjectGuid>
+    <RootNamespace>MegaX</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(ProjectDir)bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)obj\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(ProjectDir)bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)obj\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)include\;$(SolutionDir)HBE.Renderer.GL\include;$(SolutionDir)HBE.Platform.SDL\include;$(SolutionDir)HBE.Core\include;$(SolutionDir)external\nlohmann;$(SolutionDir)external\SDL3_mixer\include;$(SolutionDir)external\SDL3\include</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(SolutionDir)x64\$(Configuration)\;$(SolutionDir)external\SDL3_mixer\lib\x64;$(SolutionDir)external\SDL3\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>HBE.Core.lib;HBE.Platform.SDL.lib;HBE.Renderer.GL.lib;SDL3.lib;SDL3_mixer.lib;OpenGL32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Manifest>
+      <EnableSegmentHeap>true</EnableSegmentHeap>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)include\;$(SolutionDir)HBE.Renderer.GL\include;$(SolutionDir)HBE.Platform.SDL\include;$(SolutionDir)HBE.Core\include;$(SolutionDir)external\nlohmann;$(SolutionDir)external\SDL3_mixer\include;$(SolutionDir)external\SDL3\include</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(SolutionDir)x64\$(Configuration)\;$(SolutionDir)external\SDL3_mixer\lib\x64;$(SolutionDir)external\SDL3\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>HBE.Core.lib;HBE.Platform.SDL.lib;HBE.Renderer.GL.lib;SDL3.lib;SDL3_mixer.lib;OpenGL32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Manifest>
+      <EnableSegmentHeap>true</EnableSegmentHeap>
+    </Manifest>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HBE.Core\HBE.Core.vcxproj">
+      <Project>{1fbc35c6-d958-48ed-8d6f-63b6e543411b}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\HBE.Platform.SDL\HBE.Platform.SDL.vcxproj">
+      <Project>{f47806b3-d913-4706-ba37-ad3a96c648aa}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\HBE.Renderer.GL\HBE.Renderer.GL.vcxproj">
+      <Project>{336972ea-ea83-4eba-91e3-cbc8adc95db7}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="assets\shaders\pp_bloom.frag" />
+    <None Include="assets\shaders\pp_colorgrade.frag" />
+    <None Include="assets\shaders\pp_crt.frag" />
+    <None Include="assets\shaders\pp_pass.vert" />
+    <None Include="assets\shaders\pp_pixelate.frag" />
+    <None Include="assets\shaders\pp_vignette.frag" />
+    <None Include="assets\shaders\sprite.frag" />
+    <None Include="assets\shaders\sprite.vert" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\Game\GameLayer.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\Game\GameLayer.cpp" />
+    <ClCompile Include="src\main.cpp" />
+  </ItemGroup>
+  <!-- Runtime deps copied next to MegaX.exe for every config. -->
+  <ItemGroup>
+    <MegaXRuntimeDll Include="$(SolutionDir)external\SDL3\lib\x64\SDL3.dll" />
+    <MegaXRuntimeDll Include="$(SolutionDir)external\SDL3_mixer\lib\x64\SDL3_mixer.dll" />
+    <MegaXAsset Include="$(ProjectDir)assets\**\*" />
+  </ItemGroup>
+  <Target Name="MegaXCopyRuntime" AfterTargets="Build">
+    <Message Importance="high" Text="MegaX: copying runtime deps to $(TargetDir)" />
+    <Copy SourceFiles="@(MegaXRuntimeDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" Retries="3" />
+    <Copy SourceFiles="@(MegaXAsset)" DestinationFiles="@(MegaXAsset->'$(TargetDir)assets\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Retries="3" />
+  </Target>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

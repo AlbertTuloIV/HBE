@@ -1,0 +1,70 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{c3c94a30-0513-44f3-9f5b-ccf6caf0fab7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{5b068c1f-6938-481e-916a-d13b3ca59e18}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets">
+      <UniqueIdentifier>{90b2ba9b-c6ca-4c3c-bd10-490d94e40702}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\shaders">
+      <UniqueIdentifier>{be9d32cf-5a2c-43e0-bfec-9517a762b7b8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\sprites">
+      <UniqueIdentifier>{d9be0137-d3a8-4fa2-99e7-134572ff22a6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\sprites\Player">
+      <UniqueIdentifier>{d1d12ff9-2357-4041-b67c-cfb7317b28dd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\tilesets">
+      <UniqueIdentifier>{4b488a74-6bd1-49ed-8e29-be9bc139ea0d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\tilesets\Military">
+      <UniqueIdentifier>{66ec8be2-92e4-4d05-b3ff-537c9c1c3bee}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\tilesets\Military\Animated">
+      <UniqueIdentifier>{74284b9c-3a7d-4490-b414-1b7a4cce1a02}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\tilesets\Military\Static">
+      <UniqueIdentifier>{16adc922-ebbe-4944-808b-e2423bdc1850}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\maps">
+      <UniqueIdentifier>{685f2eb2-9b98-4a16-abcd-505aa35b5b7f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\scenes">
+      <UniqueIdentifier>{73addf61-7345-42c0-87fe-6dc3d284169e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\prefabs">
+      <UniqueIdentifier>{fc70c2cb-0a92-4be0-b3cc-885eb679a758}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\audio">
+      <UniqueIdentifier>{b6e4b772-d67f-48c9-b7ba-e918735132ac}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\fonts">
+      <UniqueIdentifier>{28247902-3830-4b15-b94c-4041a265cb60}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\ui">
+      <UniqueIdentifier>{cc87971e-7f4c-4b20-917c-dccaf99ca143}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="assets\shaders\pp_bloom.frag" />
+    <None Include="assets\shaders\pp_colorgrade.frag" />
+    <None Include="assets\shaders\pp_crt.frag" />
+    <None Include="assets\shaders\pp_pass.vert" />
+    <None Include="assets\shaders\pp_pixelate.frag" />
+    <None Include="assets\shaders\pp_vignette.frag" />
+    <None Include="assets\shaders\sprite.frag" />
+    <None Include="assets\shaders\sprite.vert" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\Game\GameLayer.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\Game\GameLayer.cpp" />
+    <ClCompile Include="src\main.cpp" />
+  </ItemGroup>
+</Project>
