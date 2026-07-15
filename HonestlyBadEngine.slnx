@@ -1,7 +1,6 @@
 <Solution>
   <Configurations>
     <Platform Name="x64" />
-    <Platform Name="x86" />
   </Configurations>
   <Project Path="HBE.Core/HBE.Core.vcxproj" Id="1fbc35c6-d958-48ed-8d6f-63b6e543411b">
     <BuildDependency Project="HBE.Platform.SDL/HBE.Platform.SDL.vcxproj" />
