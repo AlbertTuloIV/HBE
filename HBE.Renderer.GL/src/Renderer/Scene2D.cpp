@@ -1,6 +1,7 @@
 #include "HBE/Core/Log.h"
 #include "HBE/Core/UUID.h"
 #include "HBE/ECS/RuntimeComponents.h"
+#include "HBE/ECS/CombatSystem.h"
 
 #include "HBE/Renderer/Scene2D.h"
 #include "HBE/Renderer/Renderer2D.h"
@@ -156,6 +157,14 @@ namespace HBE::Renderer {
             if (rb.oneWayDisableTimer > 0.0f) {
                 rb.oneWayDisableTimer = std::max(0.0f, rb.oneWayDisableTimer - dt);
             }
+
+            if (m_reg.has<HBE::ECS::Knockback>(e)) {
+                auto& kb = m_reg.get<HBE::ECS::Knockback>(e);
+                rb.velX += kb.velX;
+                rb.velY += kb.velY;
+                kb.velX = 0.0f;
+                kb.velY = 0.0f;
+            }
         }
 
         int steps = 1;
@@ -309,6 +318,8 @@ namespace HBE::Renderer {
             }
         }
 
+        HBE::ECS::updateCombat(m_reg, dt);
+
         for (auto e : m_reg.view<AnimationComponent2D, SpriteComponent2D>()) {
             auto& anim = m_reg.get<AnimationComponent2D>(e).sm;
             auto& spr = m_reg.get<SpriteComponent2D>(e);
@@ -348,6 +359,7 @@ namespace HBE::Renderer {
         }
 
         for (auto e : m_reg.view<Transform2D, SpriteComponent2D>()) {
+            if (m_reg.has<HBE::ECS::Hitbox>(e)) continue;
             auto& tr = m_reg.get<Transform2D>(e);
             auto& spr = m_reg.get<SpriteComponent2D>(e);
 

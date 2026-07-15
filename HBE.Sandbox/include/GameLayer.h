@@ -6,6 +6,9 @@
 #include "HBE/Core/Layer.h"
 #include "HBE/Core/FileWatcher.h"
 
+#include "HBE/ECS/CombatComponents.h"
+#include "HBE/ECS/CombatEvents.h"
+
 #include "HBE/Renderer/Camera2D.h"
 #include "HBE/Renderer/Scene2D.h"
 #include "HBE/Renderer/Material.h"
@@ -98,6 +101,8 @@ private:
 	HBE::Renderer::ScriptRegistry m_scripts{};
 	HBE::Renderer::AnimationPresetRegistry m_animPresets{};
 
+	HBE::ECS::HitboxPresetRegistry m_hitboxPresets{};
+
 	HBE::Renderer::TileMap m_tileMap{};
 	HBE::Renderer::TileMapRenderer m_tileRenderer{};
 	const HBE::Renderer::TileMapLayer* m_collisionLayer = nullptr;
@@ -160,6 +165,8 @@ private:
 	
 	void registerScripts();
 	void registerAnimatorPresets();
+
+	void registerHitboxPresets();
 
 	void resetDemoState();
 	void updateDemoLogic(float dt);

@@ -7,6 +7,7 @@
 #include "HBE/ECS/Components.h"
 #include "HBE/ECS/ESCSComponents2D.h"
 #include "HBE/ECS/RuntimeComponents.h"
+#include "HBE/ECS/CombatComponents.h"
 
 #include "HBE/Renderer/Mesh.h"
 #include "HBE/Renderer/Material.h"
@@ -172,6 +173,64 @@ namespace HBE::Renderer {
         r.enableOneWay = j.value("enableOneWay", true);
         r.enableSlopes = j.value("enableSlopes", true);
         r.maxFallSpeed = j.value("maxFallSpeed", 0.0f);
+    }
+
+    static const char* factionToString(HBE::ECS::Faction f) {
+        switch (f) {
+        case HBE::ECS::Faction::Player: return "Player";
+        case HBE::ECS::Faction::Enemy: return "Enemy";
+        case HBE::ECS::Faction::Environment: return "Environment";
+        case HBE::ECS::Faction::Neutral: return "Neutral";
+        default: return "Neutral";
+        }
+    }
+
+    static HBE::ECS::Faction factionFromString(const std::string& s) {
+        if (s == "Player") return HBE::ECS::Faction::Player;
+        if (s == "Enemy") return HBE::ECS::Faction::Enemy;
+        if (s == "Environment") return HBE::ECS::Faction::Environment;
+        return HBE::ECS::Faction::Neutral;
+    }
+
+    static json toJsonFaction(const HBE::ECS::FactionComponent& f) {
+        return json{ {"team", factionToString(f.team)} };
+    }
+
+    static void fromJsonFaction(const json& j, HBE::ECS::FactionComponent& f) {
+        f.team = factionFromString(j.value("team", std::string("Neutral")));
+    }
+
+    static json toJsonHealth(const HBE::ECS::Health& h) {
+        return json{
+            {"hp",         h.hp},
+            {"maxHp",      h.maxHp}
+        };
+    }
+
+    static void fromJsonHealth(const json& j, HBE::ECS::Health& h) {
+        h.hp = j.value("hp", 3);
+        h.maxHp = j.value("maxHp", h.hp);
+        h.invulnTimer = 0.0f;
+        h.deathTimer = 0.0f;
+        h.dead = (h.hp <= 0);
+    }
+
+    static json toJsonHurtbox(const HBE::ECS::Hurtbox& hb) {
+        return json{
+            {"halfW",   hb.halfW},
+            {"halfH",   hb.halfH},
+            {"offsetX", hb.offsetX},
+            {"offsetY", hb.offsetY},
+            {"active",  hb.active}
+        };
+    }
+
+    static void fromJsonHurtbox(const json& j, HBE::ECS::Hurtbox& hb) {
+        hb.halfW = j.value("halfW", 0.0f);
+        hb.halfH = j.value("halfH", 0.0f);
+        hb.offsetX = j.value("offsetX", 0.0f);
+        hb.offsetY = j.value("offsetY", 0.0f);
+        hb.active = j.value("active", true);
     }
 
     static void migrateV1toV2(json& root) {
@@ -462,6 +521,68 @@ namespace HBE::Renderer {
                 },
                 nullptr
             });
+            // -- Faction --
+            t.push_back({
+                "Faction",
+                false,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks&, json& out) -> bool {
+                    if (!reg.has<HBE::ECS::FactionComponent>(e)) return false;
+                    out = toJsonFaction(reg.get<HBE::ECS::FactionComponent>(e));
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   Scene2D&, const SceneLoadCallbacks&,
+                   const json& j, std::string*) -> bool {
+                    HBE::ECS::FactionComponent f{};
+                    fromJsonFaction(j, f);
+                    reg.emplace<HBE::ECS::FactionComponent>(e, f);
+                    return true;
+                },
+                nullptr
+                });
+
+            // -- Health --
+            t.push_back({
+                "Health",
+                false,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks&, json& out) -> bool {
+                    if (!reg.has<HBE::ECS::Health>(e)) return false;
+                    out = toJsonHealth(reg.get<HBE::ECS::Health>(e));
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   Scene2D&, const SceneLoadCallbacks&,
+                   const json& j, std::string*) -> bool {
+                    HBE::ECS::Health h{};
+                    fromJsonHealth(j, h);
+                    reg.emplace<HBE::ECS::Health>(e, h);
+                    return true;
+                },
+                nullptr
+                });
+
+            // -- Hurtbox --
+            t.push_back({
+                "Hurtbox",
+                false,
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   const SceneSaveCallbacks&, json& out) -> bool {
+                    if (!reg.has<HBE::ECS::Hurtbox>(e)) return false;
+                    out = toJsonHurtbox(reg.get<HBE::ECS::Hurtbox>(e));
+                    return true;
+                },
+                [](HBE::ECS::Entity e, HBE::ECS::Registry& reg,
+                   Scene2D&, const SceneLoadCallbacks&,
+                   const json& j, std::string*) -> bool {
+                    HBE::ECS::Hurtbox hb{};
+                    fromJsonHurtbox(j, hb);
+                    reg.emplace<HBE::ECS::Hurtbox>(e, hb);
+                    return true;
+                },
+                nullptr
+                });
 
             return t;
         }();
@@ -490,6 +611,7 @@ namespace HBE::Renderer {
         const auto& schemas = componentSchemas();
 
         for (auto e : reg.view<Transform2D>()) {
+            if (reg.has<HBE::ECS::Hitbox>(e)) continue;
 
             if (!reg.has<HBE::ECS::IDComponent>(e)) {
                 HBE::Core::LogWarn("SceneSerializer::saveToFile: entity created "
