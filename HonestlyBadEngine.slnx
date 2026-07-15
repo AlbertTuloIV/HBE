@@ -13,4 +13,5 @@
     <BuildDependency Project="HBE.Platform.SDL/HBE.Platform.SDL.vcxproj" />
     <BuildDependency Project="HBE.Renderer.GL/HBE.Renderer.GL.vcxproj" />
   </Project>
+  <Project Path="MegaX/MegaX.vcxproj" Id="e1cd4887-7e74-4033-a21a-e8b0084afa7f" />
 </Solution>
