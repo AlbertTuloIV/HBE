@@ -41,6 +41,20 @@
     },
     "Script": {
       "name": "GoblinAI"
+    },
+    "Faction": {
+      "team": "Enemy"
+    },
+    "Health": {
+      "hp": 3,
+      "maxHp": 3
+    },
+    "Hurtbox": {
+      "halfW": 0.0,
+      "halfH": 0.0,
+      "offsetX": 0.0,
+      "offsetY": 0.0,
+      "active": true
     }
   }
 }

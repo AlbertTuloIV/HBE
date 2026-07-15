@@ -2,13 +2,8 @@
 
 namespace HBE::Sandbox {
 
-	struct Health {
-		int hp = 3;
-		int maxHp = 3;
-		float invulnTimer = 0.0f;
-		float deathTimer = 0.0f;
-		bool dead = false;
-	};
+	// NOTE: Health moved to HBE::ECS::Health in
+	// HBE/ECS/CombatComponents.h (item 21 doc 01).
 
 	enum class DemoState {
 		Playing,

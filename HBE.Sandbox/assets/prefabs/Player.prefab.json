@@ -41,6 +41,20 @@
     },
     "Script": {
       "name": "PlayerController"
+    },
+    "Faction": {
+      "team": "Player"
+    },
+    "Health": {
+      "hp": 5,
+      "maxHp": 5
+    },
+    "Hurtbox": {
+      "halfW": 0.0,
+      "halfH": 0.0,
+      "offsetX": 0.0,
+      "offsetY": 0.0,
+      "active":  true
     }
   }
 }

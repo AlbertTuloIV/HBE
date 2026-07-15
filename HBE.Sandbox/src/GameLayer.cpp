@@ -23,6 +23,7 @@
 #include "HBE/Renderer/Prefab.h"r
 #include "HBE/ECS/RuntimeComponents.h"
 #include "HBE/ECS/Components.h"
+#include "HBE/ECS/CombatComponents.h"
 
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_gamepad.h>
@@ -134,6 +135,17 @@ namespace {
     };
     static constexpr int kEntityTagPresetsCount = sizeof(kEntityTagPresets) / sizeof(kEntityTagPresets[0]);
 
+    // Item 21: faction cycle in inspector. Must stay in sync with the
+    // HBE::ECS::Faction enum ordering in CombatComponents.h.
+    static const char* kFactionPresets[] = {
+        "Neutral",
+        "Player",
+        "Enemy",
+        "Environment",
+    };
+    static constexpr int kFactionPresetsCount =
+        static_cast<int>(sizeof(kFactionPresets) / sizeof(kFactionPresets[0]));
+
     // Item 20: build a placeholder Sprite2D for "Add Component -> Sprite2D".
     // Uses whatever the sandbox already has wired up so the new sprite is
     // instantly visible. Passing pointers keeps this header-free.
@@ -169,6 +181,7 @@ void GameLayer::onAttach(Application& app) {
     m_prefabs.loadDirectory("prefabs");
     registerScripts();
     registerAnimatorPresets();
+    registerHitboxPresets();
     HBE::Core::LogInfo(std::string("CWD: ") + std::filesystem::current_path().string());
 
     m_camera.x = std::round(m_camera.x);
@@ -476,8 +489,40 @@ void GameLayer::onAttach(Application& app) {
     {
         auto& reg = m_scene.registry();
 
-        if (reg.valid(m_goblinEntity) && !reg.has<HBE::Sandbox::Health>(m_goblinEntity)) {
-            reg.emplace<HBE::Sandbox::Health>(m_goblinEntity, HBE::Sandbox::Health{ 3, 3 });
+        // -- Player: Faction + Hurtbox --
+        if (reg.valid(m_soldierEntity)) {
+            if (!reg.has<HBE::ECS::FactionComponent>(m_soldierEntity)) {
+                reg.emplace<HBE::ECS::FactionComponent>(
+                    m_soldierEntity,
+                    HBE::ECS::FactionComponent{ HBE::ECS::Faction::Player });
+            }
+            if (!reg.has<HBE::ECS::Hurtbox>(m_soldierEntity)) {
+                HBE::ECS::Hurtbox hb{};
+                // zero extents → CombatSystem falls back to Collider2D.
+                reg.emplace<HBE::ECS::Hurtbox>(m_soldierEntity, hb);
+            }
+            if (!reg.has<HBE::ECS::Health>(m_soldierEntity)) {
+                reg.emplace<HBE::ECS::Health>(
+                    m_soldierEntity,
+                    HBE::ECS::Health{ 5, 5 });
+            }
+        }
+
+        // -- Goblin: Faction + Hurtbox + Health --
+        if (reg.valid(m_goblinEntity)) {
+            if (!reg.has<HBE::ECS::FactionComponent>(m_goblinEntity)) {
+                reg.emplace<HBE::ECS::FactionComponent>(
+                    m_goblinEntity,
+                    HBE::ECS::FactionComponent{ HBE::ECS::Faction::Enemy });
+            }
+            if (!reg.has<HBE::ECS::Hurtbox>(m_goblinEntity)) {
+                reg.emplace<HBE::ECS::Hurtbox>(m_goblinEntity,
+                    HBE::ECS::Hurtbox{});
+            }
+            if (!reg.has<HBE::ECS::Health>(m_goblinEntity)) {
+                reg.emplace<HBE::ECS::Health>(m_goblinEntity,
+                    HBE::ECS::Health{ 3, 3 });
+            }
         }
 
         if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {
@@ -838,59 +883,15 @@ void GameLayer::onUpdate(float dt) {
             //m_app->audio().playSoundEx("footstep", p);
         }
         else if (ev == "hitframe") {
-            auto& reg = m_scene.registry();
-
-            if (reg.valid(m_soldierEntity) && reg.valid(m_goblinEntity) &&
-                reg.has<Transform2D>(m_soldierEntity) &&
-                reg.has<HBE::ECS::Collider2D>(m_soldierEntity) &&
-                reg.has<Transform2D>(m_goblinEntity) &&
-                reg.has<HBE::ECS::Collider2D>(m_goblinEntity) &&
-                reg.has<HBE::Sandbox::Health>(m_goblinEntity)) {
-                
-                auto& pTr = reg.get<Transform2D>(m_soldierEntity);
-                auto& pCol = reg.get<HBE::ECS::Collider2D>(m_soldierEntity);
-                auto& gTr = reg.get<Transform2D>(m_goblinEntity);
-                auto& gCol = reg.get<HBE::ECS::Collider2D>(m_goblinEntity);
-                auto& gHp = reg.get<HBE::Sandbox::Health>(m_goblinEntity);
-
-                const float facing = (pTr.scaleX >= 0.0f) ? +1.0f : -1.0f;
-
-                const float forward = 0.5f * (pCol.halfW + HBE::Sandbox::demo::ATTACK_REACH_PX);
-
-                const float ax = pTr.posX + pCol.offsetX + facing * forward;
-                const float ay = pTr.posY + pCol.offsetY;
-                const float ahx = 0.5f * HBE::Sandbox::demo::ATTACK_REACH_PX;
-                const float ahy = 0.5f * HBE::Sandbox::demo::ATTACK_HEIGHT_PX;
-
-                const float gx = gTr.posX + gCol.offsetX;
-                const float gy = gTr.posY + gCol.offsetY;
-
-                const bool overlap = std::fabs(ax - gx) <= (ahx + gCol.halfW) &&
-                    std::fabs(ay - gy) <= (ahy + gCol.halfH);
-
-                const bool canDamage = overlap && !gHp.dead && gHp.invulnTimer <= 0.0f;
-
-                if (canDamage) {
-                    gHp.hp -= 1;
-                    gHp.invulnTimer = HBE::Sandbox::demo::HIT_IFRAMES_SEC;
-                    
-                    spawnPopup(gTr.posX, gTr.posY + 60.0f, "-1",
-                        Color4{ 1.0f, 0.9f, 0.2f, 1.0f },
-                        0.75f, 40.0f);
-
-                    if (gHp.hp <= 0) {
-                        gHp.hp = 0;
-                        gHp.dead = true;
-                        gHp.deathTimer = HBE::Sandbox::demo::DEATH_FADE_SEC;
-
-                        spawnPopup(gTr.posX, gTr.posY + 90.0f, "DEFEATED",
-                            Color4{ 1.0f, 0.3f, 0.3f, 1.0f },
-                            1.2f, 20.0f);
-                    }
-                }
+            if (m_scene.registry().valid(m_soldierEntity)) {
+                HBE::ECS::spawnHitboxByName(
+                    m_scene,
+                    m_soldierEntity,
+                    m_hitboxPresets,
+                    "SoldierSlash");
             }
         }
-        });
+    });
 
     {
         auto& reg = m_scene.registry();
@@ -987,6 +988,52 @@ void GameLayer::onRender() {
                 if (reg.has<HBE::ECS::RigidBody2D>(e) && reg.get<HBE::ECS::RigidBody2D>(e).isStatic) { r = 0.2f; g = 0.9f; b = 1.0f; }
 
                 m_debug.rect(r2d, cx, cy, w, h, r, g, b, a, false);
+            }
+
+            // -- Item 21: Hurtboxes (blue) --
+            for (auto e : reg.view<HBE::ECS::Hurtbox, HBE::Renderer::Transform2D>()) {
+                const auto& hb = reg.get<HBE::ECS::Hurtbox>(e);
+                const auto& tr = reg.get<HBE::Renderer::Transform2D>(e);
+
+                float hw = hb.halfW, hh = hb.halfH;
+                float ox = hb.offsetX, oy = hb.offsetY;
+
+                if (hw <= 0.0f || hh <= 0.0f) {
+                    if (!reg.has<HBE::ECS::Collider2D>(e)) continue;
+                    const auto& col = reg.get<HBE::ECS::Collider2D>(e);
+                    hw = col.halfW; hh = col.halfH;
+                    ox = col.offsetX; oy = col.offsetY;
+                }
+
+                m_debug.rect(r2d,
+                    tr.posX + ox, tr.posY + oy,
+                    hw * 2.0f, hh * 2.0f,
+                    0.35f, 0.55f, 1.0f, hb.active ? 0.6f : 0.2f,
+                    false);
+            }
+
+            // -- Item 21: Hitboxes (red). Facing mirrors CombatSystem math --
+            for (auto e : reg.view<HBE::ECS::Hitbox>()) {
+                const auto& hb = reg.get<HBE::ECS::Hitbox>(e);
+
+                const HBE::Renderer::Transform2D* tr = nullptr;
+                if (hb.follows && reg.valid(hb.owner)
+                    && reg.has<HBE::Renderer::Transform2D>(hb.owner)) {
+                    tr = &reg.get<HBE::Renderer::Transform2D>(hb.owner);
+                }
+                if (!tr && reg.has<HBE::Renderer::Transform2D>(e)) {
+                    tr = &reg.get<HBE::Renderer::Transform2D>(e);
+                }
+                if (!tr) continue;
+
+                const float facing = (tr->scaleX < 0.0f) ? -1.0f : +1.0f;
+
+                m_debug.rect(r2d,
+                    tr->posX + hb.offsetX * facing,
+                    tr->posY + hb.offsetY,
+                    hb.halfW * 2.0f, hb.halfH * 2.0f,
+                    1.0f, 0.35f, 0.35f, hb.active ? 0.9f : 0.3f,
+                    false);
             }
         }
     }
@@ -1464,7 +1511,7 @@ void GameLayer::registerScripts() {
                 if (!tr) return;
 
                 // Do nothing once dead so the fade-out doesn't move.
-                if (reg.has<Health>(e) && reg.get<Health>(e).dead) {
+                if (reg.has<HBE::ECS::Health>(e) && reg.get<HBE::ECS::Health>(e).dead) {
                     if (auto* gAnim = m_scene.getSpriteAnimator(e)) {
                         gAnim->setBool("moving", false);
                     }
@@ -1558,15 +1605,15 @@ void GameLayer::resetDemoState() {
 
     // 1. Goblin: reset Health + snap back to spawn.
     if (reg.valid(m_goblinEntity)) {
-        if (reg.has<Health>(m_goblinEntity)) {
-            auto& gHp = reg.get<Health>(m_goblinEntity);
+        if (reg.has<HBE::ECS::Health>(m_goblinEntity)) {
+            auto& gHp = reg.get<HBE::ECS::Health>(m_goblinEntity);
             gHp.hp = gHp.maxHp;
             gHp.invulnTimer = 0.0f;
             gHp.deathTimer = 0.0f;
             gHp.dead = false;
         }
         else {
-            reg.emplace<Health>(m_goblinEntity, Health{ 3, 3 });
+            reg.emplace<HBE::ECS::Health>(m_goblinEntity, HBE::ECS::Health{ 3, 3 });
         }
 
         if (auto* gTr = m_scene.getTransform(m_goblinEntity)) {
@@ -1610,10 +1657,30 @@ void GameLayer::updateDemoLogic(float dt) {
 
     auto& reg = m_scene.registry();
 
-    for (auto e : reg.view<Health>()) {
-        auto& h = reg.get<Health>(e);
-        if (h.invulnTimer > 0.0f) h.invulnTimer = std::max(0.0f, h.invulnTimer - dt);
-        if (h.dead && h.deathTimer > 0.0f) h.deathTimer = std::max(0.0f, h.deathTimer - dt);
+    for (auto e : reg.view<HBE::ECS::Health>()) {
+        auto& h = reg.get<HBE::ECS::Health>(e);
+        if (h.invulnTimer >= HBE::Sandbox::demo::HIT_IFRAMES_SEC - dt * 2.0f
+            && h.invulnTimer > 0.0f
+            && !h.dead) {
+            if (auto* tr = m_scene.getTransform(e)) {
+                spawnPopup(tr->posX, tr->posY + 60.0f, "-1",
+                    HBE::Renderer::Color4{ 1.0f, 0.9f, 0.2f, 1.0f },
+                    0.75f, 40.0f);
+            }
+        }
+    }
+
+    for (auto e : reg.view<HBE::ECS::Health>()) {
+        auto& h = reg.get<HBE::ECS::Health>(e);
+        if (h.dead && h.deathTimer <= 0.0f && h.hp == 0) {
+            // Only run this once — deathTimer > 0 = already bootstrapped.
+            h.deathTimer = HBE::Sandbox::demo::DEATH_FADE_SEC;
+            if (auto* tr = m_scene.getTransform(e)) {
+                spawnPopup(tr->posX, tr->posY + 90.0f, "DEFEATED",
+                    HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f },
+                    1.2f, 20.0f);
+            }
+        }
     }
 
     if (m_demo.state != DemoState::Playing) {
@@ -1621,8 +1688,8 @@ void GameLayer::updateDemoLogic(float dt) {
         return;
     }
 
-    if (reg.valid(m_goblinEntity) && reg.has<Health>(m_goblinEntity)) {
-        const auto& gHp = reg.get<Health>(m_goblinEntity);
+    if (reg.valid(m_goblinEntity) && reg.has<HBE::ECS::Health>(m_goblinEntity)) {
+        const auto& gHp = reg.get<HBE::ECS::Health>(m_goblinEntity);
         if (gHp.dead && gHp.deathTimer <= 0.0f) {
             m_demo.state = DemoState::Won;
             m_demo.endBannerTimer = 0.0f;
@@ -1649,8 +1716,8 @@ void GameLayer::drawDemoHUD(HBE::Renderer::Renderer2D& r2d) {
     auto& reg = m_scene.registry();
 
     // -- Goblin HP readout in the top-right --
-    if (reg.valid(m_goblinEntity) && reg.has<Health>(m_goblinEntity)) {
-        const auto& gHp = reg.get<Health>(m_goblinEntity);
+    if (reg.valid(m_goblinEntity) && reg.has<HBE::ECS::Health>(m_goblinEntity)) {
+        const auto& gHp = reg.get<HBE::ECS::Health>(m_goblinEntity);
         std::string hpText = "Goblin HP: " +
             std::to_string(gHp.hp) + " / " + std::to_string(gHp.maxHp);
 
@@ -1973,13 +2040,56 @@ void GameLayer::drawInspector() {
             m_ui.spacing(6.0f);
         }
 
-        if (reg.has<HBE::Sandbox::Health>(m_selectedEntity)) {
-            auto& hp = reg.get<HBE::Sandbox::Health>(m_selectedEntity);
+        if (reg.has<HBE::ECS::Health>(m_selectedEntity)) {
+            auto& hp = reg.get<HBE::ECS::Health>(m_selectedEntity);
             m_ui.label("Health", true);
             m_ui.sliderInt("hp_hp", "hp", hp.hp, 0, 100);
             m_ui.sliderInt("hp_maxhp", "maxHp", hp.maxHp, 1, 100);
             m_ui.sliderFloat("hp_iframe", "invulnTimer", hp.invulnTimer, 0.0f, 2.0f, 0.01f);
             m_ui.checkbox("hp_dead", "dead", hp.dead);
+            m_ui.spacing(6.0f);
+        }
+
+        // -- Item 21: Faction editor --
+        if (reg.has<HBE::ECS::FactionComponent>(m_selectedEntity)) {
+            auto& fc = reg.get<HBE::ECS::FactionComponent>(m_selectedEntity);
+            m_ui.label("Faction", true);
+
+            int idx = static_cast<int>(fc.team);
+            if (idx < 0 || idx >= kFactionPresetsCount) idx = 0;
+
+            char label[64];
+            std::snprintf(label, sizeof(label),
+                "Team: %s (click to cycle)", kFactionPresets[idx]);
+            if (m_ui.button("btn_faction_cycle", label)) {
+                idx = (idx + 1) % kFactionPresetsCount;
+                fc.team = static_cast<HBE::ECS::Faction>(idx);
+            }
+            m_ui.spacing(6.0f);
+        }
+
+        // -- Item 21: Hurtbox editor --
+        if (reg.has<HBE::ECS::Hurtbox>(m_selectedEntity)) {
+            auto& hb = reg.get<HBE::ECS::Hurtbox>(m_selectedEntity);
+            m_ui.label("Hurtbox", true);
+            m_ui.checkbox("hb_active", "active", hb.active);
+            m_ui.sliderFloat("hb_hw",  "halfW",   hb.halfW,   0.0f, 200.0f, 0.5f);
+            m_ui.sliderFloat("hb_hh",  "halfH",   hb.halfH,   0.0f, 200.0f, 0.5f);
+            m_ui.sliderFloat("hb_ox",  "offsetX", hb.offsetX, -200.0f, 200.0f, 0.5f);
+            m_ui.sliderFloat("hb_oy",  "offsetY", hb.offsetY, -200.0f, 200.0f, 0.5f);
+            m_ui.spacing(6.0f);
+        }
+
+        // -- Item 21: Hitbox editor (transient, rarely selected) --
+        if (reg.has<HBE::ECS::Hitbox>(m_selectedEntity)) {
+            auto& h = reg.get<HBE::ECS::Hitbox>(m_selectedEntity);
+            m_ui.label("Hitbox (transient)", true);
+            std::string ownerLine = "owner: " + std::to_string((uint32_t)h.owner);
+            m_ui.label(ownerLine.c_str(), false);
+            m_ui.sliderFloat("hbx_life", "lifetime (s)", h.lifetime, 0.0f, 3.0f, 0.01f);
+            m_ui.sliderInt("hbx_dmg",   "damage",       h.damage,   0, 20);
+            m_ui.checkbox("hbx_active", "active",       h.active);
+            m_ui.checkbox("hbx_ff",     "friendlyFire", h.friendlyFire);
             m_ui.spacing(6.0f);
         }
 
@@ -2030,10 +2140,24 @@ void GameLayer::drawInspector() {
             }
         }
 
-        if (!reg.has<HBE::Sandbox::Health>(m_selectedEntity)) {
+        if (!reg.has<HBE::ECS::Health>(m_selectedEntity)) {
             if (m_ui.button("btn_add_health", "+ Add Health")) {
-                reg.emplace<HBE::Sandbox::Health>(m_selectedEntity,
-                    HBE::Sandbox::Health{ 3, 3 });
+                reg.emplace<HBE::ECS::Health>(m_selectedEntity,
+                    HBE::ECS::Health{ 3, 3 });
+            }
+        }
+
+        // -- Item 21: Add Faction / Hurtbox --
+        if (!reg.has<HBE::ECS::FactionComponent>(m_selectedEntity)) {
+            if (m_ui.button("btn_add_faction", "+ Add Faction")) {
+                reg.emplace<HBE::ECS::FactionComponent>(m_selectedEntity,
+                    HBE::ECS::FactionComponent{ HBE::ECS::Faction::Neutral });
+            }
+        }
+        if (!reg.has<HBE::ECS::Hurtbox>(m_selectedEntity)) {
+            if (m_ui.button("btn_add_hurtbox", "+ Add Hurtbox")) {
+                reg.emplace<HBE::ECS::Hurtbox>(m_selectedEntity,
+                    HBE::ECS::Hurtbox{});
             }
         }
 
@@ -2060,9 +2184,21 @@ void GameLayer::drawInspector() {
                 reg.remove<HBE::ECS::RigidBody2D>(m_selectedEntity);
             }
         }
-        if (reg.has<HBE::Sandbox::Health>(m_selectedEntity)) {
+        if (reg.has<HBE::ECS::Health>(m_selectedEntity)) {
             if (m_ui.button("btn_rm_health", "- Remove Health")) {
-                reg.remove<HBE::Sandbox::Health>(m_selectedEntity);
+                reg.remove<HBE::ECS::Health>(m_selectedEntity);
+            }
+        }
+
+        // -- Item 21: Remove Faction / Hurtbox --
+        if (reg.has<HBE::ECS::FactionComponent>(m_selectedEntity)) {
+            if (m_ui.button("btn_rm_faction", "- Remove Faction")) {
+                reg.remove<HBE::ECS::FactionComponent>(m_selectedEntity);
+            }
+        }
+        if (reg.has<HBE::ECS::Hurtbox>(m_selectedEntity)) {
+            if (m_ui.button("btn_rm_hurtbox", "- Remove Hurtbox")) {
+                reg.remove<HBE::ECS::Hurtbox>(m_selectedEntity);
             }
         }
 
@@ -2177,4 +2313,40 @@ bool GameLayer::loadSceneNow(std::string* outError) {
 
     LogInfo("Scene loaded: " + scenePath);
     return true;
+}
+
+void GameLayer::registerHitboxPresets() {
+    using namespace HBE::ECS;
+    using namespace HBE::Sandbox::demo;
+
+    HitboxPreset soldierSlash{};
+    soldierSlash.halfW = 0.5f * ATTACK_REACH_PX;
+    soldierSlash.halfH = 0.5f * ATTACK_HEIGHT_PX;
+    soldierSlash.offsetX = 0.5f * (16.0f + ATTACK_REACH_PX);
+    soldierSlash.offsetY = 2.0f;
+    soldierSlash.damage = 1;
+    soldierSlash.lifetime = 0.10f;
+    soldierSlash.follows = true;
+    soldierSlash.attackerFaction = Faction::Player;
+    soldierSlash.canHit = { true, false, true, false };
+    soldierSlash.knockbackX = 220.0f;
+    soldierSlash.knockbackY = 220.0f;
+    soldierSlash.invulnAfterHit = HIT_IFRAMES_SEC;
+    m_hitboxPresets.registerPreset("SoldierSlash", soldierSlash);
+
+    HitboxPreset goblinClaw{};
+    goblinClaw.halfW = 20.0f;
+    goblinClaw.halfH = 18.0f;
+    goblinClaw.offsetX = 30.0f;
+    goblinClaw.offsetY = 2.0f;
+    goblinClaw.damage = 1;
+    goblinClaw.lifetime = 0.12f;
+    goblinClaw.attackerFaction = Faction::Enemy;
+    goblinClaw.canHit = { true, true, false, false };
+    goblinClaw.knockbackX = 260.0f;
+    goblinClaw.knockbackY = 260.0f;
+    m_hitboxPresets.registerPreset("GoblinClaw", goblinClaw);
+
+    HBE::Core::LogInfo("HitboxPresetRegistry: registered "
+    + std::to_string(m_hitboxPresets.size()) + " preset(s).");
 }
