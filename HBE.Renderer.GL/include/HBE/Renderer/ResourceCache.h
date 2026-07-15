@@ -44,6 +44,11 @@ namespace HBE::Renderer {
             int height,
             const unsigned char* rgbaPixels);
 
+        // Returns a shared 16x16 magenta/black checker used as the
+        // "missing texture" placeholder. Never null (falls back to a
+        // 1x1 magenta RGBA if even checker generation fails).
+        Texture2D* placeholderTexture();
+
         bool reloadTexture(const std::string& name);
 
         // ----- Meshes -----

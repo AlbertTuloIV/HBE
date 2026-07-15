@@ -310,15 +310,16 @@ void GameLayer::onAttach(Application& app) {
     if (!HBE::Renderer::TileMapLoader::loadFromJsonFile(
         ap::Resolve(m_tileMapPath), m_tileMap, &err))
     {
-        LogFatal("Failed to load tilemap: " + err);
-        m_app->requestQuit();
-        return;
+        LogError("Failed to load tilemap '" + m_tileMapPath + "': " + err
+            + " — starting with an empty map.");
+        m_tileMap = HBE::Renderer::TileMap{};
+        m_missingAssetBanner = "Missing tilemap: " + m_tileMapPath;
     }
 
     if (!m_tileRenderer.build(m_app->renderer2D(), m_app->resources(), m_spriteShader, m_quadMesh, m_tileMap)) {
-        LogFatal("Failed to build TileMapRenderer");
-        m_app->requestQuit();
-        return;
+        LogError("Failed to build TileMapRenderer — tiles will not render.");
+        if (m_missingAssetBanner.empty())
+            m_missingAssetBanner = "Tilemap render build failed";
     }
 
     // Temporary: bounds disabled while map (~1280x768) matches viewport (1280x720)
@@ -343,16 +344,15 @@ void GameLayer::onAttach(Application& app) {
 
     m_collisionLayer = m_tileMap.findLayer("Ground");
     if (!m_collisionLayer) {
-        LogFatal("Tilemap missing collision layer named 'Ground'");
-        m_app->requestQuit();
-        return;
+        LogWarn("Tilemap has no 'Ground' layer — tile collision disabled.");
     }
 
     if (!HBE::Renderer::TileMapLoader::sampleTileTopColors(m_tileMap, m_tileTopColors)) {
         HBE::Core::LogInfo("TileMapLoader::sampleTileTopColors failed; player dust will use fallback color.");
     }
 
-    m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
+    if (m_collisionLayer)
+        m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
 
     {
         HBE::Renderer::Physics2DSettings phys{};
@@ -668,7 +668,8 @@ void main() {
         1024, 1024,
         12))
     {
-        LogError("FAILED to load font: " + fontPath);
+        LogError("GameLayer: failed to load font '" + fontPath
+            + "' — falling back to built-in debug font.");
     }
     else {
         m_text.setActiveFont("ui");
@@ -682,14 +683,14 @@ void main() {
     m_soldierSheet = SpriteRenderer2D::declareSpriteSheet(resources, "soldier_sheet", HBE::Core::AssetPaths::Resolve("Soldier.png"), desc);
 
     if (!m_goblinSheet.texture) {
-        LogFatal("GameLayer: failed to load Orc.png (asset root: " + HBE::Core::AssetPaths::AssetRootString() + ")");
-        m_app->requestQuit();
-        return;
+        LogError("GameLayer: failed to load Orc.png (asset root: " + HBE::Core::AssetPaths::AssetRootString()
+            + ") — using placeholder texture.");
+        m_goblinSheet.texture = resources.placeholderTexture();
     }
     if (!m_soldierSheet.texture) {
-        LogFatal("GameLayer: failed to load Soldier.png (asset root: " + HBE::Core::AssetPaths::AssetRootString() + ")");
-        m_app->requestQuit();
-        return;
+        LogError("GameLayer: failed to load Soldier.png (asset root: " + HBE::Core::AssetPaths::AssetRootString()
+            + ") — using placeholder texture.");
+        m_soldierSheet.texture = resources.placeholderTexture();
     }
 
     m_goblinMaterial.shader = m_spriteShader;
@@ -1879,6 +1880,14 @@ void GameLayer::drawDemoHUD(HBE::Renderer::Renderer2D& r2d) {
     // are LOGICAL_WIDTH x LOGICAL_HEIGHT screen-space.
 
     auto& reg = m_scene.registry();
+
+    // -- Missing-asset banner (structural fallback in use) --
+    if (!m_missingAssetBanner.empty()) {
+        m_text.drawText(r2d,
+            20.0f, LOGICAL_HEIGHT - 30.0f,
+            m_missingAssetBanner, 1.0f,
+            HBE::Renderer::Color4{ 1.0f, 0.3f, 0.3f, 1.0f });
+    }
 
     // -- Goblin HP readout in the top-right --
     if (reg.valid(m_goblinEntity) && reg.has<HBE::ECS::Health>(m_goblinEntity)) {

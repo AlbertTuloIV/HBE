@@ -113,6 +113,10 @@ private:
 	HBE::Renderer::TileMapRenderer m_tileRenderer{};
 	const HBE::Renderer::TileMapLayer* m_collisionLayer = nullptr;
 
+	// Non-empty when a structural asset (e.g. tilemap) failed to load and a
+	// fallback is in use; drawn as a red banner in drawDemoHUD().
+	std::string m_missingAssetBanner{};
+
 	HBE::Renderer::GLShader* m_spriteShader = nullptr;
 	HBE::Renderer::Mesh* m_quadMesh = nullptr;
 

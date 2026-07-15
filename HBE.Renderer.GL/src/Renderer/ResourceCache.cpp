@@ -190,6 +190,14 @@ namespace HBE::Renderer {
 		return raw;
 	}
 
+	Texture2D* ResourceCache::placeholderTexture() {
+		if (Texture2D* t = getTexture("__hbe_missing__")) return t;
+		if (Texture2D* t = getOrCreateCheckerTexture("__hbe_missing__", 16, 16)) return t;
+		// Absolute last resort: 1x1 magenta.
+		const unsigned char magenta[4] = { 255, 0, 255, 255 };
+		return getOrCreateTextureFromRGBA("__hbe_missing__", 1, 1, magenta);
+	}
+
 	Mesh* ResourceCache::getMesh(const std::string& name) const {
 		auto it = m_meshes.find(name);
 		if (it == m_meshes.end()) return nullptr;

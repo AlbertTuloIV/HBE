@@ -28,6 +28,9 @@ settings.VisualStudio.json
 *.zip
 /.hbe_ai
 
+# Packaging output
+/dist
+
 # User data — never commit (lives in %APPDATA%\HBE\HonestlyBadEngine\)
 bindings.cfg
 bindings.json

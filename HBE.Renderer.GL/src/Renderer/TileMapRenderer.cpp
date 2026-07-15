@@ -5,9 +5,13 @@
 #include "HBE/Renderer/Mesh.h"
 #include "HBE/Renderer/RenderItem.h"
 
+#include "HBE/Core/Log.h"
+
 #include <cmath>
 
 namespace HBE::Renderer {
+
+    using HBE::Core::LogError;
 
     bool TileMapRenderer::build(Renderer2D&, ResourceCache& cache, GLShader* spriteShader, Mesh* quadMesh, const TileMap& map) {
         if (!spriteShader || !quadMesh) return false;
@@ -24,7 +28,12 @@ namespace HBE::Renderer {
             d.spacing = ts.spacing;
 
             Texture2D* tex = cache.getOrCreateTextureFromFile("tileset_" + ts.name, ts.texturePath);
-            if (!tex) return false;
+            if (!tex) {
+                LogError("TileMapRenderer: failed to load tileset texture '" + ts.texturePath
+                    + "' — using placeholder.");
+                tex = cache.placeholderTexture();
+                if (!tex) return false;
+            }
 
             d.texW = tex->getWidth();
             d.texH = tex->getHeight();
