@@ -72,10 +72,6 @@ namespace {
         return target;
     }
 
-    static float LerpF(float from, float to, float t) {
-        return from + (to - from) * t;
-    }
-
     static void RegisterDefaultBindings(HBE::Input::InputMap& map)
     {
         using namespace HBE::Input;
@@ -146,6 +142,26 @@ namespace {
     static constexpr int kFactionPresetsCount =
         static_cast<int>(sizeof(kFactionPresets) / sizeof(kFactionPresets[0]));
 
+    // Item 22: derive level bounds from a tilemap layer's grid extents.
+    // Tilemap origin is (0, 0), extents run positive on both axes.
+    static void ApplyMapBounds(HBE::Renderer::CameraController& ctrl,
+                               const HBE::Renderer::TileMap& map)
+    {
+        if (map.layers.empty()) { ctrl.clearBounds(); return; }
+
+        const auto& layer = map.layers.front();
+
+        const float tw = std::max(0.0001f, map.worldTileW());
+        const float th = std::max(0.0001f, map.worldTileH());
+
+        const float minX = 0.0f;
+        const float minY = 0.0f;
+        const float maxX = static_cast<float>(layer.w) * tw;
+        const float maxY = static_cast<float>(layer.h) * th;
+
+        ctrl.setBounds(minX, minY, maxX, maxY);
+    }
+
     // Item 20: build a placeholder Sprite2D for "Add Component -> Sprite2D".
     // Uses whatever the sandbox already has wired up so the new sprite is
     // instantly visible. Passing pointers keeps this header-free.
@@ -184,15 +200,16 @@ void GameLayer::onAttach(Application& app) {
     registerHitboxPresets();
     HBE::Core::LogInfo(std::string("CWD: ") + std::filesystem::current_path().string());
 
-    m_camera.x = std::round(m_camera.x);
-    m_camera.y = std::round(m_camera.y);
-    m_camera.zoom = 1.0f;
-    m_camera.viewportWidth = LOGICAL_WIDTH;
-    m_camera.viewportHeight = LOGICAL_HEIGHT;
+    m_cameraCtrl.setViewport(LOGICAL_WIDTH, LOGICAL_HEIGHT);
+    m_cameraCtrl.camera().zoom = 1.0f;
+    m_cameraCtrl.snapTo(0.0f, 0.0f);
+    // Temporary: plain lerp-follow -- dead-zone + look-ahead disabled for now.
+    m_cameraCtrl.setDeadzone(0.0f, 0.0f);
+    m_cameraCtrl.setLookAhead(0.0f, 0.0f, 240.0f, 320.0f);
 
     m_text.setCullInset(8.0f);
 
-    app.gl().setCamera(m_camera);
+    app.gl().setCamera(m_cameraCtrl.camera());
     app.gl().setClearColor(0.1f, 0.2f, 0.35f, 1.0f);
 
     buildSpritePipeline();
@@ -280,7 +297,7 @@ void GameLayer::onAttach(Application& app) {
     m_particles.initialize(app.resources(), m_quadMesh);
     m_particles.registerEffect("rain", makeRain());
     m_particles.registerEffect("player_dust", makePlayerDust());
-    m_rainHandle = m_particles.spawnManaged("rain", m_camera.x, m_camera.y);
+    m_rainHandle = m_particles.spawnManaged("rain", m_cameraCtrl.camera().x, m_cameraCtrl.camera().y);
 
     HBE::Renderer::UI::UIStyle style;
     style.textScale = 1.0f;
@@ -303,6 +320,12 @@ void GameLayer::onAttach(Application& app) {
         m_app->requestQuit();
         return;
     }
+
+    // Temporary: bounds disabled while map (~1280x768) matches viewport (1280x720)
+    // and would pin the camera to center. Re-enable via `ApplyMapBounds` once the
+    // map is larger than the viewport.
+    // ApplyMapBounds(m_cameraCtrl, m_tileMap);
+    m_cameraCtrl.clearBounds();
 
     setupHotReloadWatches();
     hotReloadUITheme();
@@ -744,6 +767,8 @@ void GameLayer::onUpdate(float dt) {
         m_app->audio().resumeBus(HBE::Platform::Audio::Bus::SFX);
     }
 
+    // Item 22 doc 04: temporary keypad zoom removed in doc 07 -- the Dev Tools Camera slider replaces it.
+
     m_uiAnimT += dt;
     m_statTimer += (double)dt;
     m_updateCount++;
@@ -864,8 +889,8 @@ void GameLayer::onUpdate(float dt) {
     m_watcher.poll(dt);
     m_scene.update(dt, [&](const std::string& ev) {
         Transform2D* tr = m_scene.getTransform(m_soldierEntity);
-        const float px = tr ? tr->posX : m_camera.x;
-        const float py = tr ? tr->posY : m_camera.y;
+        const float px = tr ? tr->posX : m_cameraCtrl.camera().x;
+        const float py = tr ? tr->posY : m_cameraCtrl.camera().y;
 
         if (ev == "footstep") {
             spawnPopup(px, py - 30.0f, "step", Color4{ 0.8f,0.9f,1.0f,1.0f }, 0.35f, 35.0f);
@@ -884,12 +909,17 @@ void GameLayer::onUpdate(float dt) {
         }
         else if (ev == "hitframe") {
             if (m_scene.registry().valid(m_soldierEntity)) {
+                HBE::Core::LogInfo("[dbg] hitframe fired -- spawning SoldierSlash");
                 HBE::ECS::spawnHitboxByName(
                     m_scene,
                     m_soldierEntity,
                     m_hitboxPresets,
                     "SoldierSlash");
             }
+            else {
+                HBE::Core::LogWarn("[dbg] hitframe fired but m_soldierEntity is INVALID");
+            }
+            // Item 22 doc 07: hit-shake is gated on actual damage in updateDemoLogic; no shake on whiffs.
         }
     });
 
@@ -919,13 +949,12 @@ void GameLayer::onUpdate(float dt) {
         }
     }
     if (!m_rainPreWarmed) {
-        m_camera.x = playerTr->posX;
-        m_camera.y = playerTr->posY;
-        m_app->gl().setCamera(m_camera);
+        m_cameraCtrl.snapTo(playerTr->posX, playerTr->posY);
+        m_app->gl().setCamera(m_cameraCtrl.camera());
     }
 
     if (m_particles.isAlive(m_rainHandle))
-        m_particles.setPosition(m_rainHandle, m_camera.x, m_camera.y);
+        m_particles.setPosition(m_rainHandle, m_cameraCtrl.camera().x, m_cameraCtrl.camera().y);
 
     if (!m_rainPreWarmed) {
         for (int i = 0; i < 60; ++i) {
@@ -936,11 +965,34 @@ void GameLayer::onUpdate(float dt) {
 
     m_particles.update(dt);
 
-    // Camera lerp — feels smoother than snap. Item 22 will replace this
-    // with a proper deadzone / look-ahead system.
-    m_camera.x = LerpF(m_camera.x, playerTr->posX, HBE::Sandbox::demo::CAMERA_LERP);
-    m_camera.y = LerpF(m_camera.y, playerTr->posY, HBE::Sandbox::demo::CAMERA_LERP);
-    m_app->gl().setCamera(m_camera);
+    // Item 22: replaced hand-rolled LerpF with CameraController.
+    {
+        auto& reg = m_scene.registry();
+        float vx = 0.0f, vy = 0.0f;
+        if (reg.has<HBE::ECS::RigidBody2D>(m_soldierEntity)) {
+            const auto& body = reg.get<HBE::ECS::RigidBody2D>(m_soldierEntity);
+            vx = body.velX;
+            vy = body.velY;
+        }
+        m_cameraCtrl.setFollowTarget(playerTr->posX, playerTr->posY);
+        m_cameraCtrl.setFollowVelocity(vx, vy);
+        m_cameraCtrl.setFacingHintX(playerTr->scaleX < 0.0f ? -1 : +1);
+
+        // Item 22 doc 06: keep goblin partially framed when nearby and alive.
+        if (reg.valid(m_goblinEntity) && reg.has<HBE::Renderer::Transform2D>(m_goblinEntity)
+            && (!reg.has<HBE::ECS::Health>(m_goblinEntity) ||
+                !reg.get<HBE::ECS::Health>(m_goblinEntity).dead))
+        {
+            const auto& gTr = reg.get<HBE::Renderer::Transform2D>(m_goblinEntity);
+            const float dx = gTr.posX - playerTr->posX;
+            const float dy = gTr.posY - playerTr->posY;
+            if ((dx*dx + dy*dy) < (280.0f * 280.0f)) {
+                m_cameraCtrl.addSecondaryTarget(gTr.posX, gTr.posY, 0.35f);
+            }
+        }
+    }
+    m_cameraCtrl.update(dt);
+    m_app->gl().setCamera(m_cameraCtrl.camera());
 
     updateDemoLogic(dt);
 
@@ -963,7 +1015,7 @@ void GameLayer::onRender() {
     Renderer2D& r2d = m_app->renderer2D();
     m_ui.beginFrame(m_lastDt);
 
-    r2d.beginScene(m_camera, HBE::Renderer::RenderPass::World);
+    r2d.beginScene(m_cameraCtrl.camera(), HBE::Renderer::RenderPass::World);
 
     m_tileRenderer.draw(r2d, m_tileMap);
 
@@ -1035,6 +1087,16 @@ void GameLayer::onRender() {
                     1.0f, 0.35f, 0.35f, hb.active ? 0.9f : 0.3f,
                     false);
             }
+
+            // -- Item 22: camera dead zone (magenta) --
+            if (m_cameraCtrl.deadzoneHalfW > 0.0f || m_cameraCtrl.deadzoneHalfH > 0.0f) {
+                const auto dz = m_cameraCtrl.deadzoneRect();
+                const float cx = (dz.minX + dz.maxX) * 0.5f;
+                const float cy = (dz.minY + dz.maxY) * 0.5f;
+                const float w  = dz.maxX - dz.minX;
+                const float h  = dz.maxY - dz.minY;
+                m_debug.rect(r2d, cx, cy, w, h, 1.0f, 0.3f, 1.0f, 0.7f, false);
+            }
         }
     }
 
@@ -1070,7 +1132,7 @@ void GameLayer::onRender() {
     tools.x = 20.0f;
     tools.y = 20.0f;
     tools.w = 320.0f;
-    tools.h = 280.0f;
+    tools.h = 460.0f;
 
     if (m_showDevTools) {
         auto savedStyle = m_ui.style();
@@ -1083,7 +1145,7 @@ void GameLayer::onRender() {
             m_ui.setStyle(s);
         }
 
-        m_ui.beginPanel("dev_tools", tools, "Dev Tools");
+        m_ui.beginScrollPanel("dev_tools", tools, "Dev Tools");
 
         m_ui.checkbox("chk_cull", "Scene Culling", m_enableCulling);
         m_scene.setCullingEnabled(m_enableCulling);
@@ -1134,6 +1196,45 @@ void GameLayer::onRender() {
                     HBE::Renderer::Color4{ 1.0f, 0.4f, 0.4f, 1.0f },
                     2.0f, 0.0f);
             }
+        }
+
+        // -------- Item 22: Camera dev tools --------
+        m_ui.spacing(8.0f);
+        m_ui.label("Camera", true);
+
+        auto& cc = m_cameraCtrl;
+
+        m_ui.checkbox("cam_follow", "Follow Enabled", cc.followEnabled);
+        m_ui.sliderFloat("cam_follow_resp", "Follow Response",
+            cc.followResponse, 0.0f, 20.0f, 0.1f);
+
+        m_ui.sliderFloat("cam_dz_x", "Deadzone Half W",
+            cc.deadzoneHalfW, 0.0f, 200.0f, 1.0f);
+        m_ui.sliderFloat("cam_dz_y", "Deadzone Half H",
+            cc.deadzoneHalfH, 0.0f, 200.0f, 1.0f);
+
+        m_ui.sliderFloat("cam_la_x", "Look-Ahead X",
+            cc.lookAheadX, 0.0f, 200.0f, 1.0f);
+        m_ui.sliderFloat("cam_la_y", "Look-Ahead Y",
+            cc.lookAheadY, 0.0f, 200.0f, 1.0f);
+
+        float z = cc.zoomTarget;
+        if (m_ui.sliderFloat("cam_zoom", "Zoom Target",
+                z, 0.25f, 4.0f, 0.01f)) {
+            cc.setZoomTarget(z);
+        }
+
+        m_ui.checkbox("cam_bounds",  "Bounds Enabled", cc.boundsEnabled);
+        m_ui.checkbox("cam_pixsnap", "Pixel Snap",     cc.pixelSnap);
+
+        if (m_ui.button("btn_cam_shake", "Test Shake (0.4)")) {
+            cc.addShake(0.4f);
+        }
+        {
+            char traumaLine[64];
+            std::snprintf(traumaLine, sizeof(traumaLine),
+                "Trauma: %.2f", cc.trauma());
+            m_ui.label(traumaLine, true);
         }
 
         m_ui.endPanel();
@@ -1397,6 +1498,10 @@ void GameLayer::hotReloadTileMap() {
 
     m_scene.setTileCollisionContext(&m_tileMap, m_collisionLayer);
 
+    // Temporary: see onAttach note -- bounds off while map matches viewport size.
+    // ApplyMapBounds(m_cameraCtrl, m_tileMap);
+    m_cameraCtrl.clearBounds();
+
     LogInfo("TileMap hot-reloaded succesfully: " + m_tileMapPath);
     spawnPopup(20.0f, 650.0f, "TileMap hot-reloaded succesfully",
         HBE::Renderer::Color4{ 0.3f, 1.0f, 0.3f, 1.0f }, 1.25f, 0.0f);
@@ -1643,10 +1748,13 @@ void GameLayer::resetDemoState() {
     m_demo.state = DemoState::Playing;
     m_demo.endBannerTimer = 0.0f;
 
+    // Item 22 doc 07: prime HP snapshots so the reload itself doesn't trigger a shake next frame.
+    m_prevPlayerHP = -1;
+    m_prevGoblinHP = -1;
+
     if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {
-        m_camera.x = pTr->posX;
-        m_camera.y = pTr->posY;
-        m_app->gl().setCamera(m_camera);
+        m_cameraCtrl.snapTo(pTr->posX, pTr->posY);
+        m_app->gl().setCamera(m_cameraCtrl.camera());
     }
 
     HBE::Core::LogInfo("Demo: state reset.");
@@ -1656,6 +1764,20 @@ void GameLayer::updateDemoLogic(float dt) {
     using namespace HBE::Sandbox;
 
     auto& reg = m_scene.registry();
+
+    // Item 22 doc 07: shake on actual damage (any faction), gated on HP delta.
+    auto shakeOnHit = [&](HBE::Renderer::EntityID e, int& prev, float trauma, const char* who) {
+        if (!reg.valid(e) || !reg.has<HBE::ECS::Health>(e)) return;
+        const auto& hp = reg.get<HBE::ECS::Health>(e);
+        if (prev >= 0 && hp.hp < prev) {
+            m_cameraCtrl.addShake(trauma);
+            HBE::Core::LogInfo(std::string("[dbg] ") + who + " lost HP: " +
+                std::to_string(prev) + " -> " + std::to_string(hp.hp));
+        }
+        prev = hp.hp;
+    };
+    shakeOnHit(m_soldierEntity, m_prevPlayerHP, 0.35f, "player");
+    shakeOnHit(m_goblinEntity,  m_prevGoblinHP, 0.20f, "goblin");
 
     for (auto e : reg.view<HBE::ECS::Health>()) {
         auto& h = reg.get<HBE::ECS::Health>(e);
@@ -1693,6 +1815,10 @@ void GameLayer::updateDemoLogic(float dt) {
         if (gHp.dead && gHp.deathTimer <= 0.0f) {
             m_demo.state = DemoState::Won;
             m_demo.endBannerTimer = 0.0f;
+            m_cameraCtrl.addShake(0.4f);
+            if (auto* gTr = m_scene.getTransform(m_goblinEntity)) {
+                m_cameraCtrl.focusOn(gTr->posX, gTr->posY + 20.0f, 0.8f);
+            }
             HBE::Core::LogInfo("Demo: WIN.");
         }
     }
@@ -1702,6 +1828,7 @@ void GameLayer::updateDemoLogic(float dt) {
         if (pTr.posY < demo::LOSE_Y_THRESHOLD) {
             m_demo.state = DemoState::Lost;
             m_demo.endBannerTimer = 0.0f;
+            m_cameraCtrl.addShake(0.6f);
             HBE::Core::LogInfo("Demo: LOSE.");
         }
     }
@@ -1821,8 +1948,8 @@ void GameLayer::drawInspector() {
             // Give the new entity a Transform2D at the camera centre so
             // it's immediately visible / clickable in the world.
             HBE::Renderer::Transform2D tr{};
-            tr.posX = m_camera.x;
-            tr.posY = m_camera.y;
+            tr.posX = m_cameraCtrl.camera().x;
+            tr.posY = m_cameraCtrl.camera().y;
             tr.scaleX = 100.0f;
             tr.scaleY = 100.0f;
             tr.rotation = 0.0f;
@@ -2100,8 +2227,8 @@ void GameLayer::drawInspector() {
         if (!reg.has<HBE::Renderer::Transform2D>(m_selectedEntity)) {
             if (m_ui.button("btn_add_transform", "+ Add Transform2D")) {
                 HBE::Renderer::Transform2D tr{};
-                tr.posX = m_camera.x;
-                tr.posY = m_camera.y;
+                tr.posX = m_cameraCtrl.camera().x;
+                tr.posY = m_cameraCtrl.camera().y;
                 tr.scaleX = 100.0f;
                 tr.scaleY = 100.0f;
                 reg.emplace<HBE::Renderer::Transform2D>(m_selectedEntity, tr);
@@ -2270,7 +2397,12 @@ bool GameLayer::loadSceneNow(std::string* outError) {
         };
     loadCb.material = [this](const std::string& key) -> HBE::Renderer::Material* {
         if (key == "goblin_mat") return &m_goblinMaterial;
-        if (key == "solder_mat") return &m_soldierMaterial;
+        if (key == "soldier_mat") return &m_soldierMaterial;
+        return nullptr;
+        };
+    loadCb.sheet = [this](const std::string& key) -> const HBE::Renderer::SpriteRenderer2D::SpriteSheetHandle* {
+        if (key == "orc_sheet")     return &m_goblinSheet;
+        if (key == "soldier_sheet") return &m_soldierSheet;
         return nullptr;
         };
 
@@ -2310,6 +2442,12 @@ bool GameLayer::loadSceneNow(std::string* outError) {
         m_tileMapPath = tilemapPath;
     }
     hotReloadTileMap();
+
+    // Item 22 doc 07: prevent visible slide from the previous scene into the new one.
+    if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {
+        m_cameraCtrl.snapTo(pTr->posX, pTr->posY);
+        m_app->gl().setCamera(m_cameraCtrl.camera());
+    }
 
     LogInfo("Scene loaded: " + scenePath);
     return true;

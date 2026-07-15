@@ -10,6 +10,7 @@
 #include "HBE/ECS/CombatEvents.h"
 
 #include "HBE/Renderer/Camera2D.h"
+#include "HBE/Renderer/CameraController.h"
 #include "HBE/Renderer/Scene2D.h"
 #include "HBE/Renderer/Material.h"
 #include "HBE/Renderer/SpriteRenderer2D.h"
@@ -95,7 +96,11 @@ private:
 
 	HBE::Sandbox::DemoGameState m_demo{};
 
-	HBE::Renderer::Camera2D m_camera{};
+	// Item 22 doc 07: previous-frame HP snapshots for cheap hit detection (shake gating).
+	int m_prevPlayerHP = -1;
+	int m_prevGoblinHP = -1;
+
+	HBE::Renderer::CameraController m_cameraCtrl{};
 	HBE::Renderer::Scene2D m_scene{};
 	HBE::Renderer::PrefabLibrary m_prefabs{};
 	HBE::Renderer::ScriptRegistry m_scripts{};

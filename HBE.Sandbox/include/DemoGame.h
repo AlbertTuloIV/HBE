@@ -31,7 +31,6 @@ namespace HBE::Sandbox {
 		constexpr float DEATH_FADE_SEC = 0.60f;
 		constexpr float GOBLIN_PATROL_RADIUS = 96.0f;
 		constexpr float GOBLIN_PATROL_SPEED = 60.0f;
-		constexpr float CAMERA_LERP = 0.15f;
 		constexpr float RESTART_DELAY = 0.75f;
 	}
 }
