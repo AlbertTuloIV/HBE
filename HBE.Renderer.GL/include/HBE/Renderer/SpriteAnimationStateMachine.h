@@ -129,6 +129,7 @@ namespace HBE::Renderer {
 
 		// useful for "attack" style states
 		bool isClipFinished() const { return m_clipFinished; }
+		int currentFrame() const { return m_frame; }
 
 	private:
 		// state machine data

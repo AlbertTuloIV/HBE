@@ -1,15 +1,16 @@
 #include "HBE/Core/Log.h"
 #include "HBE/Core/UUID.h"
+
 #include "HBE/ECS/RuntimeComponents.h"
 #include "HBE/ECS/CombatSystem.h"
+#include "HBE/ECS/Components.h"
+
+#include "HBE/Events/GameplayEvents.h"
 
 #include "HBE/Renderer/Scene2D.h"
 #include "HBE/Renderer/Renderer2D.h"
 #include "HBE/Renderer/Material.h"
 #include "HBE/Renderer/Mesh.h"
-
-#include "HBE/ECS/Components.h"
-#include "HBE/ECS/RuntimeComponents.h"
 
 #include "HBE/Renderer/TileMap.h"
 #include "HBE/Renderer/TileCollision.h"
@@ -318,13 +319,24 @@ namespace HBE::Renderer {
             }
         }
 
-        HBE::ECS::updateCombat(m_reg, dt);
+        HBE::ECS::updateCombat(m_reg, dt, &m_bus);
 
         for (auto e : m_reg.view<AnimationComponent2D, SpriteComponent2D>()) {
             auto& anim = m_reg.get<AnimationComponent2D>(e).sm;
             auto& spr = m_reg.get<SpriteComponent2D>(e);
 
-            anim.update(dt, onAnimEvent);
+            anim.update(dt, [&](const std::string& eventName) {
+                HBE::Events::AnimationEvent evt{};
+                evt.entity = e;
+                evt.name = eventName;
+                evt.stateName = anim.getState();
+                evt.frameIndex = anim.currentFrame();
+                m_bus.enqueue(evt);
+
+                if (onAnimEvent) {
+                    onAnimEvent(eventName);
+                }
+            });
 
             RenderItem tmp;
             tmp.mesh = spr.mesh;
@@ -337,6 +349,8 @@ namespace HBE::Renderer {
 
             std::memcpy(spr.uvRect, tmp.uvRect, sizeof(tmp.uvRect));
         }
+
+        m_bus.drain();
     }
 
     void Scene2D::render(Renderer2D& renderer) {
@@ -394,6 +408,7 @@ namespace HBE::Renderer {
         m_tileMap = nullptr;
         m_collisionLayer = nullptr;
         m_idToEntity.clear();
+        m_bus.clear();
     }
 
 } // namespace HBE::Renderer

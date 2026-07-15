@@ -6,6 +6,9 @@
 #include "HBE/ECS/Components.h"
 #include "HBE/Renderer/Transform2D.h"
 
+#include "HBE/Core/EventBus.h"
+#include "HBE/Events/GameplayEvents.h"
+
 namespace HBE::ECS {
 
 	namespace {
@@ -67,7 +70,7 @@ namespace HBE::ECS {
 		}
 	}
 
-	void updateCombat(Registry& reg, float dt) {
+	void updateCombat(Registry& reg, float dt, HBE::Core::EventBus* bus) {
 		for (auto e : reg.view<Health>()) {
 			auto& h = reg.get<Health>(e);
 			if (h.invulnTimer > 0.0f) h.invulnTimer = std::max(0.0f, h.invulnTimer - dt);
@@ -142,13 +145,32 @@ namespace HBE::ECS {
 
 				if (!aabbOverlap(hitAABB, v.aabb)) continue;
 
+				int hpBefore = -1;
+				int hpAfter = -1;
+				bool justDied = false;
+
 				if (v.hasHealth) {
 					auto& h = reg.get<Health>(v.entity);
+					hpBefore = h.hp;
 					h.hp = std::max(0, h.hp - hit.damage);
+					hpAfter = h.hp;
 					h.invulnTimer = hit.invulnAfterHit;
 					if (h.hp <= 0 && !h.dead) {
 						h.dead = true;
+						justDied = true;
 					}
+				}
+
+				if (bus) {
+					HBE::Events::DamageEvent de{};
+					de.attacker = hit.owner;
+					de.victim = v.entity;
+					de.damage = hit.damage;
+					de.hpBefore = hpBefore;
+					de.hpAfter = hpAfter;
+					de.victimX = v.aabb.cx;
+					de.victimY = v.aabb.cy;
+					bus->publish<HBE::Events::DamageEvent>(de);
 				}
 
 				float kx = hit.knockbackX;
@@ -169,8 +191,22 @@ namespace HBE::ECS {
 					auto& kb = reg.get<Knockback>(v.entity);
 					kb.velX += kx;
 					kb.velY += ky;
+
+					if (bus) {
+						bus->publish<HBE::Events::KnockbackAppliedEvent>(
+							HBE::Events::KnockbackAppliedEvent{ v.entity, kx, ky });
+					}
 				}
 				hit.alreadyHit.push_back(v.entity);
+
+				if (bus && justDied) {
+					HBE::Events::DeathEvent ev{};
+					ev.victim = v.entity;
+					ev.killedBy = hit.owner;
+					ev.victimX = v.aabb.cx;
+					ev.victimY = v.aabb.cy;
+					bus->publish<HBE::Events::DeathEvent>(ev);
+				}
 			}
 		}
 		for (auto e : toDestroy) {

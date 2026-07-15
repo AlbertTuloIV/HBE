@@ -20,7 +20,7 @@
 #include "HBE/Renderer/PostProcessStack.h"
 
 #include "HBE/Renderer/SceneSerializer.h"
-#include "HBE/Renderer/Prefab.h"r
+#include "HBE/Renderer/Prefab.h"
 #include "HBE/ECS/RuntimeComponents.h"
 #include "HBE/ECS/Components.h"
 #include "HBE/ECS/CombatComponents.h"
@@ -560,6 +560,8 @@ void GameLayer::onAttach(Application& app) {
         m_demo.endBannerTimer = 0.0f;
     }
 
+    rewireBusSubscriptions();
+
     LogInfo("GameLayer attached.");
 }
 
@@ -848,6 +850,7 @@ void GameLayer::onUpdate(float dt) {
                 if (tag == "Player")  m_soldierEntity = ent;
                 if (tag == "Goblin")  m_goblinEntity = ent;
             }
+            rewireBusSubscriptions();
         }
 
         float instFps = (dt > 0.00001f) ? (1.0f / dt) : 0.0f;
@@ -887,41 +890,7 @@ void GameLayer::onUpdate(float dt) {
         }
     }
     m_watcher.poll(dt);
-    m_scene.update(dt, [&](const std::string& ev) {
-        Transform2D* tr = m_scene.getTransform(m_soldierEntity);
-        const float px = tr ? tr->posX : m_cameraCtrl.camera().x;
-        const float py = tr ? tr->posY : m_cameraCtrl.camera().y;
-
-        if (ev == "footstep") {
-            spawnPopup(px, py - 30.0f, "step", Color4{ 0.8f,0.9f,1.0f,1.0f }, 0.35f, 35.0f);
-
-            //HBE::Platform::Audio::PlayParams p;
-            //p.bus = HBE::Platform::Audio::Bus::SFX;
-            //p.gain = 0.55f;
-            //p.positional = true;
-            //p.worldX = px;
-            //p.worldY = py;
-            //p.minDistance = 24.0f;
-            //p.maxDistance = 260.0f;
-            //p.panRange = 220.0f;
-
-            //m_app->audio().playSoundEx("footstep", p);
-        }
-        else if (ev == "hitframe") {
-            if (m_scene.registry().valid(m_soldierEntity)) {
-                HBE::Core::LogInfo("[dbg] hitframe fired -- spawning SoldierSlash");
-                HBE::ECS::spawnHitboxByName(
-                    m_scene,
-                    m_soldierEntity,
-                    m_hitboxPresets,
-                    "SoldierSlash");
-            }
-            else {
-                HBE::Core::LogWarn("[dbg] hitframe fired but m_soldierEntity is INVALID");
-            }
-            // Item 22 doc 07: hit-shake is gated on actual damage in updateDemoLogic; no shake on whiffs.
-        }
-    });
+    m_scene.update(dt);
 
     {
         auto& reg = m_scene.registry();
@@ -1528,6 +1497,113 @@ void GameLayer::hotReloadUITheme() {
 void GameLayer::onDetach() {
     HBE::Input::Get().saveToFile(HBE::Core::AssetPaths::ResolveUser(BINDINGS_LOGICAL));
     m_particles.shutdown();
+    m_subAnimEvent.reset();
+    m_subDamageEvent.reset();
+    m_subDeathEvent.reset();
+}
+
+void GameLayer::rewireBusSubscriptions() {
+    auto& bus = m_scene.eventBus();
+
+    m_subAnimEvent = HBE::Core::ScopedSubscription(
+        bus,
+        bus.subscribe<HBE::Events::AnimationEvent>(
+            [this](const HBE::Events::AnimationEvent& ev) { onAnimationEvent(ev); }));
+
+    m_subDamageEvent = HBE::Core::ScopedSubscription(
+        bus,
+        bus.subscribe<HBE::Events::DamageEvent>(
+            [this](const HBE::Events::DamageEvent& ev) { onDamageEvent(ev); }));
+
+    m_subDeathEvent = HBE::Core::ScopedSubscription(
+        bus,
+        bus.subscribe<HBE::Events::DeathEvent>(
+            [this](const HBE::Events::DeathEvent& ev) { onDeathEvent(ev); }));
+}
+
+void GameLayer::onAnimationEvent(const HBE::Events::AnimationEvent& ev) {
+    Transform2D* tr = m_scene.getTransform(ev.entity);
+    const float px = tr ? tr->posX : m_cameraCtrl.camera().x;
+    const float py = tr ? tr->posY : m_cameraCtrl.camera().y;
+
+    if (ev.name == "footstep") {
+        spawnPopup(px, py - 30.0f, "step", Color4{ 0.8f,0.9f,1.0f,1.0f }, 0.35f, 35.0f);
+
+        //HBE::Platform::Audio::PlayParams p;
+        //p.bus = HBE::Platform::Audio::Bus::SFX;
+        //p.gain = 0.55f;
+        //p.positional = true;
+        //p.worldX = px;
+        //p.worldY = py;
+        //p.minDistance = 24.0f;
+        //p.maxDistance = 260.0f;
+        //p.panRange = 220.0f;
+
+        //m_app->audio().playSoundEx("footstep", p);
+        return;
+    }
+
+    if (ev.name == "hitframe") {
+        auto& reg = m_scene.registry();
+        if (!reg.valid(ev.entity)) {
+            HBE::Core::LogWarn("[dbg] hitframe fired but attacker entity is INVALID");
+            return;
+        }
+
+        const char* preset = nullptr;
+        if (ev.entity == m_soldierEntity) {
+            preset = "SoldierSlash";
+        }
+        else if (ev.entity == m_goblinEntity) {
+            preset = "GoblinClaw";
+        }
+        else if (reg.has<HBE::ECS::FactionComponent>(ev.entity)) {
+            const auto team = reg.get<HBE::ECS::FactionComponent>(ev.entity).team;
+            if (team == HBE::ECS::Faction::Player) preset = "SoldierSlash";
+            if (team == HBE::ECS::Faction::Enemy)  preset = "GoblinClaw";
+        }
+
+        if (!preset) {
+            HBE::Core::LogWarn("[dbg] hitframe fired but attacker has no mapped preset");
+            return;
+        }
+
+        HBE::ECS::spawnHitboxByName(m_scene, ev.entity, m_hitboxPresets, preset);
+        // Hit-shake is driven by DamageEvent in onDamageEvent(); no shake on whiffs.
+    }
+}
+
+void GameLayer::onDamageEvent(const HBE::Events::DamageEvent& ev) {
+    // Camera shake scaled by who got hit: the player getting hurt is more
+    // dramatic than the goblin taking a swing.
+    const float trauma = (ev.victim == m_soldierEntity) ? 0.35f : 0.20f;
+    m_cameraCtrl.addShake(trauma);
+
+    // Floating damage number over the victim.
+    const HBE::Renderer::Color4 color = (ev.victim == m_soldierEntity)
+        ? HBE::Renderer::Color4{ 1.0f, 0.4f, 0.4f, 1.0f }
+        : HBE::Renderer::Color4{ 1.0f, 0.9f, 0.2f, 1.0f };
+    spawnPopup(ev.victimX, ev.victimY + 60.0f,
+        "-" + std::to_string(ev.damage), color, 0.75f, 40.0f);
+}
+
+void GameLayer::onDeathEvent(const HBE::Events::DeathEvent& ev) {
+    using namespace HBE::Sandbox;
+    if (m_demo.state != DemoState::Playing) return;
+
+    if (ev.victim == m_soldierEntity) {
+        m_demo.state = DemoState::Lost;
+        m_demo.endBannerTimer = 0.0f;
+        m_cameraCtrl.addShake(0.6f);
+        HBE::Core::LogInfo("Demo: LOSE.");
+    }
+    else if (ev.victim == m_goblinEntity) {
+        m_demo.state = DemoState::Won;
+        m_demo.endBannerTimer = 0.0f;
+        m_cameraCtrl.addShake(0.4f);
+        m_cameraCtrl.focusOn(ev.victimX, ev.victimY + 20.0f, 0.8f);
+        HBE::Core::LogInfo("Demo: WIN.");
+    }
 }
 
 void GameLayer::registerScripts() {
@@ -1748,9 +1824,8 @@ void GameLayer::resetDemoState() {
     m_demo.state = DemoState::Playing;
     m_demo.endBannerTimer = 0.0f;
 
-    // Item 22 doc 07: prime HP snapshots so the reload itself doesn't trigger a shake next frame.
-    m_prevPlayerHP = -1;
-    m_prevGoblinHP = -1;
+    // Scene entities were rebuilt; re-establish our EventBus subscriptions.
+    rewireBusSubscriptions();
 
     if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {
         m_cameraCtrl.snapTo(pTr->posX, pTr->posY);
@@ -1764,33 +1839,6 @@ void GameLayer::updateDemoLogic(float dt) {
     using namespace HBE::Sandbox;
 
     auto& reg = m_scene.registry();
-
-    // Item 22 doc 07: shake on actual damage (any faction), gated on HP delta.
-    auto shakeOnHit = [&](HBE::Renderer::EntityID e, int& prev, float trauma, const char* who) {
-        if (!reg.valid(e) || !reg.has<HBE::ECS::Health>(e)) return;
-        const auto& hp = reg.get<HBE::ECS::Health>(e);
-        if (prev >= 0 && hp.hp < prev) {
-            m_cameraCtrl.addShake(trauma);
-            HBE::Core::LogInfo(std::string("[dbg] ") + who + " lost HP: " +
-                std::to_string(prev) + " -> " + std::to_string(hp.hp));
-        }
-        prev = hp.hp;
-    };
-    shakeOnHit(m_soldierEntity, m_prevPlayerHP, 0.35f, "player");
-    shakeOnHit(m_goblinEntity,  m_prevGoblinHP, 0.20f, "goblin");
-
-    for (auto e : reg.view<HBE::ECS::Health>()) {
-        auto& h = reg.get<HBE::ECS::Health>(e);
-        if (h.invulnTimer >= HBE::Sandbox::demo::HIT_IFRAMES_SEC - dt * 2.0f
-            && h.invulnTimer > 0.0f
-            && !h.dead) {
-            if (auto* tr = m_scene.getTransform(e)) {
-                spawnPopup(tr->posX, tr->posY + 60.0f, "-1",
-                    HBE::Renderer::Color4{ 1.0f, 0.9f, 0.2f, 1.0f },
-                    0.75f, 40.0f);
-            }
-        }
-    }
 
     for (auto e : reg.view<HBE::ECS::Health>()) {
         auto& h = reg.get<HBE::ECS::Health>(e);
@@ -1810,19 +1858,9 @@ void GameLayer::updateDemoLogic(float dt) {
         return;
     }
 
-    if (reg.valid(m_goblinEntity) && reg.has<HBE::ECS::Health>(m_goblinEntity)) {
-        const auto& gHp = reg.get<HBE::ECS::Health>(m_goblinEntity);
-        if (gHp.dead && gHp.deathTimer <= 0.0f) {
-            m_demo.state = DemoState::Won;
-            m_demo.endBannerTimer = 0.0f;
-            m_cameraCtrl.addShake(0.4f);
-            if (auto* gTr = m_scene.getTransform(m_goblinEntity)) {
-                m_cameraCtrl.focusOn(gTr->posX, gTr->posY + 20.0f, 0.8f);
-            }
-            HBE::Core::LogInfo("Demo: WIN.");
-        }
-    }
-
+    // WIN (goblin defeated) and combat LOSE (player defeated) are driven by
+    // DeathEvent in onDeathEvent(). The fall-off-the-map LOSE stays a poll
+    // because it isn't a combat death.
     if (reg.valid(m_soldierEntity) && reg.has<Transform2D>(m_soldierEntity)) {
         const auto& pTr = reg.get<Transform2D>(m_soldierEntity);
         if (pTr.posY < demo::LOSE_Y_THRESHOLD) {
@@ -2442,6 +2480,7 @@ bool GameLayer::loadSceneNow(std::string* outError) {
         m_tileMapPath = tilemapPath;
     }
     hotReloadTileMap();
+    rewireBusSubscriptions();
 
     // Item 22 doc 07: prevent visible slide from the previous scene into the new one.
     if (auto* pTr = m_scene.getTransform(m_soldierEntity)) {

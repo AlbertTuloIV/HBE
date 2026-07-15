@@ -5,9 +5,11 @@
 
 #include "HBE/Core/Layer.h"
 #include "HBE/Core/FileWatcher.h"
+#include "HBE/Core/EventBus.h"
 
 #include "HBE/ECS/CombatComponents.h"
 #include "HBE/ECS/CombatEvents.h"
+#include "HBE/Events/GameplayEvents.h"
 
 #include "HBE/Renderer/Camera2D.h"
 #include "HBE/Renderer/CameraController.h"
@@ -67,6 +69,9 @@ private:
 	HBE::Renderer::UI::UIContext m_ui{};
 	HBE::Renderer::ParticleSystem m_particles{};
 	HBE::Core::FileWatcher m_watcher{};
+	HBE::Core::ScopedSubscription m_subAnimEvent{};
+	HBE::Core::ScopedSubscription m_subDamageEvent{};
+	HBE::Core::ScopedSubscription m_subDeathEvent{};
 
 	// Hot reload targets (relative to working directory)
 	std::string m_tileMapPath = "maps/test_map.json";
@@ -95,10 +100,6 @@ private:
 	static constexpr float LOGICAL_HEIGHT = 720.0f;
 
 	HBE::Sandbox::DemoGameState m_demo{};
-
-	// Item 22 doc 07: previous-frame HP snapshots for cheap hit detection (shake gating).
-	int m_prevPlayerHP = -1;
-	int m_prevGoblinHP = -1;
 
 	HBE::Renderer::CameraController m_cameraCtrl{};
 	HBE::Renderer::Scene2D m_scene{};
@@ -170,6 +171,10 @@ private:
 	
 	void registerScripts();
 	void registerAnimatorPresets();
+	void rewireBusSubscriptions();
+	void onAnimationEvent(const HBE::Events::AnimationEvent& ev);
+	void onDamageEvent(const HBE::Events::DamageEvent& ev);
+	void onDeathEvent(const HBE::Events::DeathEvent& ev);
 
 	void registerHitboxPresets();
 
