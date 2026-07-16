@@ -32,19 +32,23 @@ namespace MegaX {
 		Camera2D& cam = m_camera.camera();
 		cam.viewportWidth = kLogicalWidth;
 		cam.viewportHeight = kLogicalHeight;
-		// pixelSnap rounds the camera to whole WORLD units. At zoom 3 one world
-		// unit = 3 screen pixels, so snapping makes the camera stair-step in 3px
-		// jumps while the player glides -> judder + blur. Keep it off while the
-		// camera is magnified; textures are already GL_NEAREST so sprites stay crisp.
 		m_camera.pixelSnap = false;
 		m_camera.followResponse = 9.0f;
 		m_camera.snapZoom(kCameraZoom);
 
+        if (!m_world.load(app.renderer2D(), app.resources(),
+            m_spriteShader, m_quadMesh, "maps/level_01.json")) {
+            LogError("MegaX GameLayer: world load failed (continuing empty.)");
+        }
+
 		if (!m_player.init(app.resources(), m_quadMesh, m_spriteShader)) {
 			LogError("MegaX GameLayer: player init failed.");
 		}
-		m_player.setPosition(0.0f, 0.0f);
-		m_camera.snapTo(0.0f, 0.0f);
+
+        const float startX = m_world.pixelWidth() * 0.5f;
+        const float startY = m_world.pixelHeight() * 0.5f;
+        m_player.setPosition(startX, startY);
+        m_camera.snapTo(startX, startY);
 		app.gl().setCamera(m_camera.camera());
 
 		LogInfo("MegaX GameLayer attached (player ghost state).");
@@ -60,6 +64,7 @@ namespace MegaX {
 			m_player.toggleHelmet();
 		}
 
+        m_world.update(dt);
 		m_player.setMoveInput(ix, iy);
 		m_player.update(dt);
 
@@ -73,6 +78,7 @@ namespace MegaX {
 		Renderer2D& r2d = m_app->renderer2D();
 
 		r2d.beginScene(m_camera.camera(), RenderPass::World);
+        m_world.render(r2d);
 		m_player.render(r2d);
 		r2d.endScene();
 	}

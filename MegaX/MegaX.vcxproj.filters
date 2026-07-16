@@ -59,14 +59,18 @@
     <None Include="assets\shaders\pp_vignette.frag" />
     <None Include="assets\shaders\sprite.frag" />
     <None Include="assets\shaders\sprite.vert" />
+    <None Include="assets\maps\level_01.json" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\Game\GameLayer.h" />
     <ClInclude Include="include\Game\Player.h" />
+    <ClInclude Include="include\World\AnimatedTile.h" />
+    <ClInclude Include="include\World\World.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Game\GameLayer.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\Game\Player.cpp" />
+    <ClCompile Include="src\World\World.cpp" />
   </ItemGroup>
 </Project>
