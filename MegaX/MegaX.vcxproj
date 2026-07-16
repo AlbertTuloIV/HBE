@@ -114,9 +114,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\Game\GameLayer.h" />
+    <ClInclude Include="include\Game\Player.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Game\GameLayer.cpp" />
+    <ClCompile Include="src\Game\Player.cpp" />
     <ClCompile Include="src\main.cpp" />
   </ItemGroup>
   <!-- Runtime deps copied next to MegaX.exe for every config. -->
