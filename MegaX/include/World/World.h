@@ -36,11 +36,19 @@ namespace MegaX {
 		float pixelHeight() const;
 
 	private:
+
+		void loadAnimatedTiles(HBE::Renderer::ResourceCache& resources, const std::string& mapAbsPath);
+
+		void computeFrameUV(const AnimatedTile& a, int frame, float outUV[4]) const;
+
 		void renderAnimatedTiles(HBE::Renderer::Renderer2D& r2d);
 
 		HBE::Renderer::TileMap m_map{};
 		HBE::Renderer::TileMapRenderer m_renderer{};
 		bool m_loaded = false;
+
+		HBE::Renderer::GLShader* m_spriteShader = nullptr;
+		HBE::Renderer::Mesh* m_quadMesh = nullptr;
 
 		std::vector<AnimatedTile> m_animatedTiles{};
 		float m_animClock = 0.0f;

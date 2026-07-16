@@ -14,4 +14,9 @@
     <BuildDependency Project="HBE.Renderer.GL/HBE.Renderer.GL.vcxproj" />
   </Project>
   <Project Path="MegaX/MegaX.vcxproj" Id="e1cd4887-7e74-4033-a21a-e8b0084afa7f" />
+  <Project Path="HBMapMaker/HBMapMaker.vcxproj" Id="e51949f3-8d78-4e60-b771-2f8a317ca13b">
+    <BuildDependency Project="HBE.Core/HBE.Core.vcxproj" />
+    <BuildDependency Project="HBE.Platform.SDL/HBE.Platform.SDL.vcxproj" />
+    <BuildDependency Project="HBE.Renderer.GL/HBE.Renderer.GL.vcxproj" />
+  </Project>
 </Solution>

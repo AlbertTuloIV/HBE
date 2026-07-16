@@ -1,0 +1,7 @@
+[INFO]SDL_Init(SDL_INIT_VIDEO) rc=1 (video subsystem already initialized).
+[WARN]SDL_GL_SetSwapInterval failed: 
+[INFO]OpenGL context created successfully.
+[INFO]SDLPlatform initialized successfully.
+[INFO]OpenGL initialized via GLAD. Version 3.3
+[ERROR]AssetPaths::Initialize: could not locate an 'assets' folder. Searched from exe (G:\Dev\HBE\HBMapMaker\bin\x64\Debug\) and CWD (G:\Dev\HBE\HBMapMaker\bin\x64\Debug).
+[INFO]HBMapMaker started.
