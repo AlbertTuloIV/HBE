@@ -103,6 +103,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <None Include="assets\maps\level_01.json" />
     <None Include="assets\shaders\pp_bloom.frag" />
     <None Include="assets\shaders\pp_colorgrade.frag" />
     <None Include="assets\shaders\pp_crt.frag" />
@@ -115,11 +116,14 @@
   <ItemGroup>
     <ClInclude Include="include\Game\GameLayer.h" />
     <ClInclude Include="include\Game\Player.h" />
+    <ClInclude Include="include\World\AnimatedTile.h" />
+    <ClInclude Include="include\World\World.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Game\GameLayer.cpp" />
     <ClCompile Include="src\Game\Player.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\World\World.cpp" />
   </ItemGroup>
   <!-- Runtime deps copied next to MegaX.exe for every config. -->
   <ItemGroup>
