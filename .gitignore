@@ -39,3 +39,5 @@ HBE.Sandbox/bindings.json
 x64/**/bindings.cfg
 /MegaX/obj
 /MegaX/bin
+/HBE.Renderer.GL/HBE.Renderer.GL/x64
+/HBE.Renderer.GL/HBE.Renderer.GL/x64
