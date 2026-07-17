@@ -116,12 +116,14 @@
   <ItemGroup>
     <ClInclude Include="include\Game\GameLayer.h" />
     <ClInclude Include="include\Game\Player.h" />
+    <ClInclude Include="include\Game\Bullet.h" />
     <ClInclude Include="include\World\AnimatedTile.h" />
     <ClInclude Include="include\World\World.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Game\GameLayer.cpp" />
     <ClCompile Include="src\Game\Player.cpp" />
+    <ClCompile Include="src\Game\Bullet.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\World\World.cpp" />
   </ItemGroup>

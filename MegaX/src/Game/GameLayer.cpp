@@ -45,28 +45,69 @@ namespace MegaX {
 			LogError("MegaX GameLayer: player init failed.");
 		}
 
+		// --- collision: the "Ground" layer carries the solid tiles ---
+		m_ground = m_world.map().findLayer("Ground");
+		if (!m_ground) {
+			LogError("MegaX GameLayer: no 'Ground' layer in map — player will not collide.");
+		}
+		m_player.setCollision(&m_world.map(), m_ground);
+
+		if (!m_bullets.init(app.resources(), m_quadMesh, m_spriteShader)) {
+			LogError("MegaX GameLayer: bullet manager init failed.");
+		}
+
         const float startX = m_world.pixelWidth() * 0.5f;
         const float startY = m_world.pixelHeight() * 0.5f;
         m_player.setPosition(startX, startY);
         m_camera.snapTo(startX, startY);
 		app.gl().setCamera(m_camera.camera());
 
-		LogInfo("MegaX GameLayer attached (player ghost state).");
+		LogInfo("MegaX GameLayer attached (Play mode; press G for Ghost).");
 	}
 
 	void GameLayer::onUpdate(float dt) {
+		// horizontal run (both modes)
 		const float ix = (Input::IsKeyDown(SDL_SCANCODE_D) ? 1.0f : 0.0f)
 			- (Input::IsKeyDown(SDL_SCANCODE_A) ? 1.0f : 0.0f);
+
+		// vertical fly intent — only used by Ghost mode; Play mode ignores iy
 		const float iy = (Input::IsKeyDown(SDL_SCANCODE_SPACE) ? 1.0f : 0.0f)
 			- (Input::IsKeyDown(SDL_SCANCODE_S) ? 1.0f : 0.0f);
+
+		// platformer intents (Play mode)
+		const bool jumpPressed = Input::IsKeyPressed(SDL_SCANCODE_SPACE); // one-shot
+		const bool jumpHeld    = Input::IsKeyDown(SDL_SCANCODE_SPACE);    // for variable height
+		const bool crouchHeld  = Input::IsKeyDown(SDL_SCANCODE_S);
+
+		// shooting (J) — semi/auto-fire handled in Player at a cadence
+		const bool firePressed = Input::IsKeyPressed(SDL_SCANCODE_E);
+		const bool fireHeld    = Input::IsKeyDown(SDL_SCANCODE_E);
 
 		if (Input::IsKeyPressed(SDL_SCANCODE_H)) {
 			m_player.toggleHelmet();
 		}
 
+		// G toggles Play <-> Ghost (fly, no gravity/collision — for map building)
+		if (Input::IsKeyPressed(SDL_SCANCODE_G)) {
+			m_player.toggleMode();
+			LogInfo(m_player.mode() == Player::Mode::Ghost
+				? "MegaX: Ghost mode (fly, no collision)."
+				: "MegaX: Play mode (gravity + collision).");
+		}
+
         m_world.update(dt);
 		m_player.setMoveInput(ix, iy);
+		m_player.setJumpInput(jumpPressed, jumpHeld);
+		m_player.setCrouchInput(crouchHeld);
+		m_player.setFireInput(firePressed, fireHeld);
 		m_player.update(dt);
+
+		// spawn any bullet the player fired this frame, then advance bullets
+		float bx, by; int bdir;
+		if (m_player.consumeShot(bx, by, bdir)) {
+			m_bullets.spawn(bx, by, bdir);
+		}
+		m_bullets.update(dt, &m_world.map(), m_ground, m_camera.camera());
 
 		m_camera.setFollowTarget(m_player.x(), m_player.y());
 		m_camera.setFollowVelocity(m_player.velX(), m_player.velY());
@@ -80,6 +121,7 @@ namespace MegaX {
 		r2d.beginScene(m_camera.camera(), RenderPass::World);
         m_world.render(r2d);
 		m_player.render(r2d);
+		m_bullets.render(r2d);
 		r2d.endScene();
 	}
 
