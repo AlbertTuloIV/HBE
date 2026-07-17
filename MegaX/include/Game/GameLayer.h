@@ -4,6 +4,7 @@
 #include "HBE/Renderer/CameraController.h"
 
 #include "Game/Player.h"
+#include "Game/Bullet.h"
 #include "World/World.h"
 
 namespace HBE::Core { class Application; }
@@ -27,5 +28,7 @@ namespace MegaX {
 		HBE::Renderer::CameraController m_camera{};
 		Player m_player{};
 		World m_world{};
+		BulletManager m_bullets{};
+		const HBE::Renderer::TileMapLayer* m_ground = nullptr;
 	};
 }
