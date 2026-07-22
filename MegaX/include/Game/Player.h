@@ -52,6 +52,14 @@ namespace MegaX {
 		// muzzle world position + direction (+1/-1) for a bullet spawn.
 		bool consumeShot(float& x, float& y, int& dir);
 
+		bool landedThisFrame() const { return m_landedThisFrame; }
+
+		int groundTileId() const { return m_groundTileId; }
+
+		float feetY() const { return m_box.cy - m_box.h * 0.5f; }
+
+		HBE::Renderer::AABB hurtbox() const { return m_box; }
+
 		// --- mode (item 05 flips this on a hot-key) ---
 		void setMode(Mode m) { m_mode = m; }
 		Mode mode() const { return m_mode; }
@@ -97,6 +105,9 @@ namespace MegaX {
 		bool m_crouchHeld  = false;
 		bool m_firePressed = false;
 		bool m_fireHeld    = false;
+
+		bool m_landedThisFrame = false;
+		int m_groundTileId = 0;
 
 		// shooting state
 		float m_fireCooldown = 0.0f;   // time until the next shot may fire

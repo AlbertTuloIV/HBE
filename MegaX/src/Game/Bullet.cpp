@@ -39,14 +39,15 @@ namespace MegaX {
 	}
 
 	bool BulletManager::pointInSolid(const TileMap* map, const TileMapLayer* layer, float x, float y) const {
-		if (!map || !layer) return false;
+		if (!map || !layer) return 0;
 		const float tw = map->worldTileW();
 		const float th = map->worldTileH();
+		if (tw <= 0.0f || th <= 0.0f) return 0;
 		const int tx = static_cast<int>(std::floor(x / tw));
 		const int ty = static_cast<int>(std::floor(y / th));
 		const int id = layer->at(tx, ty);
-		if (id == 0) return false;
-		return map->tilesets[layer->tilesetIndex].isSolid(id);
+		if (id == 0) return 0;
+		return map->tilesets[layer->tilesetIndex].isSolid(id) ? id : 0;
 	}
 
 	void BulletManager::update(float dt, const TileMap* map, const TileMapLayer* layer, const Camera2D& cam) {
@@ -61,8 +62,15 @@ namespace MegaX {
 		for (auto& b : m_bullets) {
 			if (!b.alive) continue;
 			b.x += b.vx * dt;
-			if (pointInSolid(map, layer, b.x, b.y)) { b.alive = false; continue; }
-			if (b.x < minX || b.x > maxX || b.y < minY || b.y > maxY) b.alive = false;
+
+			if (const int id = pointInSolid(map, layer, b.x, b.y); id != 0) {
+				m_impacts.push_back(Impact{ b.x, b.y, id });
+				b.alive = false;
+				continue;
+			}
+			if (b.x < minX || b.x > maxX || b.y < minY || b.y > maxY) {
+				b.alive = false;
+			}
 		}
 
 		m_bullets.erase(

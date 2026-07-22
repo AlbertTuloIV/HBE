@@ -114,6 +114,9 @@
     <None Include="assets\shaders\sprite.vert" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="include\Game\Effects.h" />
+    <ClInclude Include="include\Game\Enemy.h" />
+    <ClInclude Include="include\Game\EnemyManager.h" />
     <ClInclude Include="include\Game\GameLayer.h" />
     <ClInclude Include="include\Game\Player.h" />
     <ClInclude Include="include\Game\Bullet.h" />
@@ -121,6 +124,9 @@
     <ClInclude Include="include\World\World.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Game\Effects.cpp" />
+    <ClCompile Include="src\Game\Enemy.cpp" />
+    <ClCompile Include="src\Game\EnemyManager.cpp" />
     <ClCompile Include="src\Game\GameLayer.cpp" />
     <ClCompile Include="src\Game\Player.cpp" />
     <ClCompile Include="src\Game\Bullet.cpp" />

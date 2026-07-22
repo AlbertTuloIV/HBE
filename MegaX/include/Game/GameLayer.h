@@ -2,9 +2,12 @@
 
 #include "HBE/Core/Layer.h"
 #include "HBE/Renderer/CameraController.h"
+#include "HBE/Renderer/DebugDraw2D.h"
 
 #include "Game/Player.h"
 #include "Game/Bullet.h"
+#include "Game/Effects.h"
+#include "Game/EnemyManager.h"
 #include "World/World.h"
 
 namespace HBE::Core { class Application; }
@@ -29,6 +32,11 @@ namespace MegaX {
 		Player m_player{};
 		World m_world{};
 		BulletManager m_bullets{};
+		Effects m_effects{};
+		EnemyManager m_enemies{};
 		const HBE::Renderer::TileMapLayer* m_ground = nullptr;
+
+		HBE::Renderer::DebugDraw2D m_debug{};
+		bool m_showHitBoxes = false;
 	};
 }

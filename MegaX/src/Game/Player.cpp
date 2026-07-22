@@ -57,6 +57,9 @@ namespace MegaX {
 	static constexpr float kMuzzleFwdStand = 30.0f, kMuzzleUpStand = 1.0f;
 	static constexpr float kMuzzleFwdAir   = 30.0f, kMuzzleUpAir   = 2.0f;
 	static constexpr float kMuzzleFwdCrouch = 28.0f, kMuzzleUpCrouch = -14.0f;
+	// Run-and-gun frames draw the gun ~4 px lower than the standing-shoot pose,
+	// so slide the muzzle origin down when the player fires while moving.
+	static constexpr float kMuzzleFwdWalk  = 30.0f, kMuzzleUpWalk  = kMuzzleUpStand - 4.0f;
 
 	// Feet stay at the box bottom; the sprite's frame-bottom is placed there.
 	static float feetToCenterOffset(float boxH) {
@@ -242,6 +245,7 @@ namespace MegaX {
 	void Player::updatePlay(float dt) {
 		// --- timers (coyote uses last frame's grounded state) ---
 		m_coyote  = std::max(0.0f, m_coyote - dt);
+		m_landedThisFrame = false;
 		m_jumpBuf = m_jumpPressed ? kJumpBuf : std::max(0.0f, m_jumpBuf - dt);
 		const bool onGroundPrev = m_grounded;
 		if (onGroundPrev) m_coyote = kCoyote;
@@ -284,6 +288,7 @@ namespace MegaX {
 			float mfx, mfy;
 			if (airborne)         { mfx = kMuzzleFwdAir;    mfy = kMuzzleUpAir; }
 			else if (wantCrouch)  { mfx = kMuzzleFwdCrouch; mfy = kMuzzleUpCrouch; }
+			else if (m_inX != 0.0f) { mfx = kMuzzleFwdWalk; mfy = kMuzzleUpWalk; }
 			else                  { mfx = kMuzzleFwdStand;  mfy = kMuzzleUpStand; }
 
 			m_shotX = m_x + static_cast<float>(m_facing) * mfx;
@@ -331,6 +336,20 @@ namespace MegaX {
 		const bool landedThisFrame = (!onGroundPrev && res.grounded);
 		m_landTimer = std::max(0.0f, m_landTimer - dt);
 		if (landedThisFrame) m_landTimer = kLandTime;
+
+		m_landedThisFrame = landedThisFrame;
+
+		m_groundTileId = 0;
+		if (m_grounded && m_map && m_collLayer) {
+			const float tw = m_map->worldTileW();
+			const float th = m_map->worldTileH();
+			if (tw > 0.0f && th > 0.0f) {
+				const float bottom = m_box.cy - m_box.h * 0.5f;
+				const int tx = static_cast<int>(std::floor(m_box.cx / tw));
+				const int ty = static_cast<int>(std::floor((bottom - 0.5f) / th));
+				m_groundTileId = m_collLayer->at(tx, ty);
+			}
+		}
 
 		// --- animation selection ---
 		const bool onGround = m_grounded || m_coyote > 0.0f;   // debounce ground jitter

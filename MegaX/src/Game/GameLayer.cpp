@@ -56,11 +56,33 @@ namespace MegaX {
 			LogError("MegaX GameLayer: bullet manager init failed.");
 		}
 
-        const float startX = m_world.pixelWidth() * 0.5f;
-        const float startY = m_world.pixelHeight() * 0.5f;
+        if (!m_effects.init(app.resources(), m_quadMesh, m_world.map(), m_ground)) {
+            LogError("MegaX GameLayer: effects init failed.");
+        }
+
+        if (!m_enemies.init(app.resources(), m_quadMesh, m_spriteShader)) {
+            LogError("MegaX GameLayer: enemy manager init failed.");
+        }
+
+        if (!m_debug.initialize(app.resources(), m_quadMesh)) {
+            LogError("MegaX GameLayer: debug draw init failed (B overlay disabled).");
+        }
+
+        const float startX = (m_world.pixelWidth() * 0.5f) - 128.0f; // X
+        const float startY = 130.0f; // Y
         m_player.setPosition(startX, startY);
         m_camera.snapTo(startX, startY);
 		app.gl().setCamera(m_camera.camera());
+
+        {
+            constexpr float kTilePx = 32.0f;
+            const float ex = startX + 5.0f * kTilePx; // X
+            const float eGroundY = 130.0f; // Y
+            if (Enemy* e = m_enemies.spawn(ex, eGroundY, -1)) {
+                e->maxHp();
+                e->spawn(ex, eGroundY, -1);
+            }
+        }
 
 		LogInfo("MegaX GameLayer attached (Play mode; press G for Ghost).");
 	}
@@ -79,7 +101,7 @@ namespace MegaX {
 		const bool jumpHeld    = Input::IsKeyDown(SDL_SCANCODE_SPACE);    // for variable height
 		const bool crouchHeld  = Input::IsKeyDown(SDL_SCANCODE_S);
 
-		// shooting (J) — semi/auto-fire handled in Player at a cadence
+		// shooting (E) — semi/auto-fire handled in Player at a cadence
 		const bool firePressed = Input::IsKeyPressed(SDL_SCANCODE_E);
 		const bool fireHeld    = Input::IsKeyDown(SDL_SCANCODE_E);
 
@@ -95,6 +117,13 @@ namespace MegaX {
 				: "MegaX: Play mode (gravity + collision).");
 		}
 
+        if(Input::IsKeyPressed(SDL_SCANCODE_B)){
+            m_showHitBoxes = !m_showHitBoxes;
+            LogInfo(m_showHitBoxes
+                ? "MegaX: hit/hurt box overlay ON."
+                : "MegaX: hit/hurt box overlay OFF.");
+        }
+
         m_world.update(dt);
 		m_player.setMoveInput(ix, iy);
 		m_player.setJumpInput(jumpPressed, jumpHeld);
@@ -102,17 +131,47 @@ namespace MegaX {
 		m_player.setFireInput(firePressed, fireHeld);
 		m_player.update(dt);
 
-		// spawn any bullet the player fired this frame, then advance bullets
+        // spawn any bullet the player fired this frame, then advance bullets
 		float bx, by; int bdir;
 		if (m_player.consumeShot(bx, by, bdir)) {
 			m_bullets.spawn(bx, by, bdir);
+
+            m_effects.spawnMuzzleFlash(bx, by, bdir);
+            // Casings eject from the ~ejection port near the gun body, not the
+            // barrel tip: ~5 px in front of the player center, at gun height.
+            const float casingX = m_player.x() + static_cast<float>(bdir) * 5.0f;
+            m_effects.spawnCasing(casingX, by, bdir);
 		}
 		m_bullets.update(dt, &m_world.map(), m_ground, m_camera.camera());
+
+        m_enemies.checkBulletHits(m_bullets, &m_effects, 1);
+
+        {
+            std::vector<BulletManager::Impact> impacts;
+            if (m_bullets.consumeImpacts(impacts)) {
+                for (const auto& imp : impacts) {
+                    m_effects.spawnBulletImpact(imp.x, imp.y, imp.tileId);
+                }
+            }
+        }
+
+        if (m_player.landedThisFrame()) {
+            m_effects.spawnLandingDust(m_player.x(), m_player.feetY(), m_player.groundTileId());
+        }
+
+        {
+            const bool moving = (ix != 0.0f);
+            const bool grounded = (m_player.velY() == 0.0f) && (m_player.groundTileId() != 0);
+            m_effects.tickWalkDust(dt, m_player.x(), m_player.feetY(), m_player.groundTileId(), moving, grounded);
+        }
 
 		m_camera.setFollowTarget(m_player.x(), m_player.y());
 		m_camera.setFollowVelocity(m_player.velX(), m_player.velY());
 		m_camera.update(dt);
 		m_app->gl().setCamera(m_camera.camera());
+
+        m_enemies.update(dt);
+        m_effects.update(dt);
 	}
 
 	void GameLayer::onRender() {
@@ -120,8 +179,17 @@ namespace MegaX {
 
 		r2d.beginScene(m_camera.camera(), RenderPass::World);
         m_world.render(r2d);
+        m_enemies.render(r2d);
 		m_player.render(r2d);
 		m_bullets.render(r2d);
+        m_effects.render(r2d);
+
+        if (m_showHitBoxes) {
+            const HBE::Renderer::AABB pb = m_player.hurtbox();
+            m_debug.rect(r2d, pb.cx, pb.cy, pb.w, pb.h, 0.35f, 0.55f, 1.0f, 1.0f, false);
+            m_enemies.debugDrawBoxes(m_debug, r2d);
+        }
+
 		r2d.endScene();
 	}
 
